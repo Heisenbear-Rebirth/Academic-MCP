@@ -1,0 +1,12 @@
+/.playwright-mcp
+/debug.html
+/debug_count.py
+/debug_download.py
+/downloads
+/failed_download.png
+/final_test.py
+/search_result.png
+/test_md_output
+/test_outputs
+/venv
+/__pycache__

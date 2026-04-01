@@ -1,0 +1,4 @@
+mcp
+playwright
+beautifulsoup4
+pymupdf4llm
