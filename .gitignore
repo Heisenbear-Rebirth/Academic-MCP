@@ -1,12 +1,33 @@
-/.playwright-mcp
-/debug.html
-/debug_count.py
-/debug_download.py
-/downloads
-/failed_download.png
-/final_test.py
-/search_result.png
-/test_md_output
-/test_outputs
-/venv
-/__pycache__
+# Python virtual environments & Cache
+venv/
+env/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Testing & Auto-Generated Document Outputs
+# Our scrapers dynamically download PDFs and Markdown to output folders, do not track them!
+test_md_output*/
+test_output_*/
+test_outputs/
+arxiv_test_md_output/
+ieee_test_md_output/
+downloads/
+
+# Playwright & DataDome Authenticated Persistent Context profiles
+# DO NOT track these to avoid breaking local cross-environment security states
+.sd_profile/
+.acm_profile/
+.playwright-mcp/
+
+# Debug and Logging
+*.log
+*.err
+*.out
+test_*_logs.txt
+
+# Local settings / IDE
+.vscode/
+.idea/
+.DS_Store
