@@ -1,0 +1,1815 @@
+- generic [ref=e1]:
+  - button "Skip to main content" [ref=e2] [cursor=pointer]
+  - dialog "Cookie 同意横幅" [ref=e3]:
+    - generic [ref=e4]:
+      - generic [ref=e5]: 本网站利用 Cookie 等技术来启用基本网站功能以及 分析、个性化定制 和 有针对性的广告。
+      - link "隐私政策" [active] [ref=e6] [cursor=pointer]:
+        - /url: https://www.ieee.org/security-privacy.html
+    - generic [ref=e7]:
+      - button "接受" [ref=e8] [cursor=pointer]
+      - button "拒绝非必要的" [ref=e9] [cursor=pointer]
+  - generic [ref=e12]:
+    - generic [ref=e15]:
+      - button "Skip to Main Content" [ref=e16] [cursor=pointer]
+      - banner [ref=e17]:
+        - generic [ref=e21]:
+          - list [ref=e23]:
+            - listitem [ref=e24]:
+              - link "IEEE.org" [ref=e25] [cursor=pointer]:
+                - /url: https://www.ieee.org/
+            - listitem [ref=e26]:
+              - link "IEEE Xplore" [ref=e27] [cursor=pointer]:
+                - /url: /Xplore/home.jsp
+                - text: IEEE
+                - emphasis [ref=e28]: Xplore
+            - listitem [ref=e29]:
+              - link "IEEE SA" [ref=e30] [cursor=pointer]:
+                - /url: https://standards.ieee.org/
+            - listitem [ref=e31]:
+              - link "IEEE Spectrum" [ref=e32] [cursor=pointer]:
+                - /url: https://spectrum.ieee.org/
+            - listitem [ref=e33]:
+              - link "More Sites" [ref=e34] [cursor=pointer]:
+                - /url: https://www.ieee.org/sitemap.html
+          - list [ref=e37]:
+            - listitem [ref=e38]:
+              - link "Donate" [ref=e39] [cursor=pointer]:
+                - /url: https://www.ieee.org/give
+            - listitem [ref=e40]:
+              - link "Cart" [ref=e41] [cursor=pointer]:
+                - /url: https://www.ieee.org/cart/public/myCart/page.html?refSite=https://ieeexplore.ieee.org&refSiteName=IEEE%20Xplore
+            - text:  
+            - listitem [ref=e42]:
+              - link "Create Account" [ref=e43] [cursor=pointer]:
+                - /url: javascript:void()
+            - listitem [ref=e44]:
+              - link "Personal Sign In" [ref=e45] [cursor=pointer]:
+                - /url: javascript:void()
+        - generic [ref=e47]:
+          - generic [ref=e50]:
+            - text: 
+            - generic [ref=e52]:
+              - link "IEEE Xplore logo - Link to home" [ref=e56] [cursor=pointer]:
+                - /url: /Xplore/home.jsp
+                - img "IEEE Xplore logo - Link to home" [ref=e57]
+              - navigation [ref=e59]:
+                - list [ref=e60]:
+                  - listitem [ref=e61]:
+                    - button "Browse" [ref=e63] [cursor=pointer]:
+                      - text: Browse
+                      - generic [ref=e64]: 
+                  - listitem [ref=e65]:
+                    - button "My Settings" [ref=e67] [cursor=pointer]:
+                      - text: My Settings
+                      - generic [ref=e68]: 
+                  - listitem [ref=e69]:
+                    - button "Help" [ref=e71] [cursor=pointer]:
+                      - text: Help
+                      - generic [ref=e72]: 
+            - generic [ref=e78]:
+              - generic [ref=e80]:
+                - text: "Access provided by:"
+                - generic "TONGJI UNIVERSITY" [ref=e81]
+              - link "Sign Out" [ref=e83] [cursor=pointer]:
+                - /url: /servlet/Login?logout=/Xplore/guesthome.jsp
+            - img "IEEE logo - Link to IEEE main site homepage" [ref=e88]
+          - generic [ref=e92]:
+            - search [ref=e93]:
+              - generic [ref=e94]: Search by Content Type
+              - generic [ref=e96]:
+                - combobox "Search by Content Type" [ref=e97]:
+                  - option "Search by All" [selected]: All
+                  - option "Search by Books": Books
+                  - option "Search by Conferences": Conferences
+                  - option "Search by Courses": Courses
+                  - option "Search by Journals & Magazines": Journals & Magazines
+                  - option "Search by Standards": Standards
+                  - option "Search by Authors": Authors
+                  - option "Search by Citations": Citations
+                  - option "Search by Images (Beta)": Images (Beta)
+                - text: 
+              - generic [ref=e99]:
+                - searchbox "main" [ref=e103]
+                - button "Search" [ref=e105] [cursor=pointer]: 
+            - link "ADVANCED SEARCH" [ref=e109] [cursor=pointer]:
+              - /url: /search/advanced
+              - text: ADVANCED SEARCH 
+          - text:   
+      - main [ref=e110]:
+        - generic [ref=e113]:
+          - generic [ref=e114]:
+            - generic [ref=e208]:
+              - search [ref=e211]:
+                - searchbox "search within results" [ref=e215]
+                - button "Search Within" [ref=e216] [cursor=pointer]: 
+              - list [ref=e217]:
+                - listitem [ref=e218]:
+                  - button "Download PDFs" [ref=e220] [cursor=pointer]
+                - listitem [ref=e221]:
+                  - button "Items Per Page" [ref=e224] [cursor=pointer]
+                - listitem [ref=e225]:
+                  - button "Export" [ref=e227] [cursor=pointer]
+                - listitem [ref=e228]:
+                  - generic [ref=e229]:
+                    - text: 
+                    - button "Set Search Alerts" [ref=e230] [cursor=pointer]
+                - listitem [ref=e231]:
+                  - link "Search History" [ref=e232] [cursor=pointer]:
+                    - /url: /search-history
+            - generic [ref=e118]:
+              - heading "Showing 1-25 of 488,819 resultsfor Machine Learning Remove Machine Learning filter" [level=1] [ref=e233]:
+                - generic [ref=e234]: Showing 1-25 of 488,819 results
+                - generic [ref=e235]:
+                  - text: for
+                  - strong [ref=e236]:
+                    - generic [ref=e240]:
+                      - generic [ref=e241]: Machine Learning
+                      - button "Remove Machine Learning filter" [ref=e242] [cursor=pointer]: 
+              - generic [ref=e246]:
+                - generic [ref=e248]:
+                  - checkbox "Conferences (388,676)" [ref=e249]
+                  - text: Conferences (388,676)
+                - generic [ref=e251]:
+                  - checkbox "Journals (84,217)" [ref=e252]
+                  - text: Journals (84,217)
+                - generic [ref=e254]:
+                  - checkbox "Books (8,158)" [ref=e255]
+                  - text: Books (8,158)
+                - generic [ref=e257]:
+                  - checkbox "Magazines (5,289)" [ref=e258]
+                  - text: Magazines (5,289)
+                - generic [ref=e260]:
+                  - checkbox "Early Access Articles (2,290)" [ref=e261]
+                  - text: Early Access Articles (2,290)
+                - generic [ref=e263]:
+                  - checkbox "Standards (166)" [ref=e264]
+                  - text: Standards (166)
+                - generic [ref=e266]:
+                  - checkbox "Courses (23)" [ref=e267]
+                  - text: Courses (23)
+              - generic:  |
+          - generic [ref=e119]:
+            - generic [ref=e269]:
+              - generic [ref=e270]:
+                - generic [ref=e271]: "Publications You May Be Interested In:"
+                - generic [ref=e273] [cursor=pointer]:
+                  - text: Hide Related Publications
+                  - generic [ref=e274]: 
+              - generic [ref=e275]:
+                - 'link "Books:Machine Learning for Civil and Environmental Engineers: A Practical Approach to Data-Driven Analysis, Explainability, and Causality" [ref=e277] [cursor=pointer]':
+                  - /url: /book/10950199
+                  - generic [ref=e279]: "Machine Learning for Civil and Environmental Engineers: A Practical Approach to Data-Driven Analysis, Explainability, and Causality"
+                - 'link "Books:Business Forecasting: The Emerging Role of Artificial Intelligence and Machine Learning" [ref=e281] [cursor=pointer]':
+                  - /url: /book/10950306
+                  - generic [ref=e283]: "Business Forecasting: The Emerging Role of Artificial Intelligence and Machine Learning"
+                - link "Books:Real-World Machine Learning" [ref=e285] [cursor=pointer]:
+                  - /url: /document/10280029
+                  - generic [ref=e287]: Real-World Machine Learning
+                - 'link "Books:Tiny Machine Learning: Design Principles and Applications" [ref=e289] [cursor=pointer]':
+                  - /url: /book/11345183
+                  - generic [ref=e291]: "Tiny Machine Learning: Design Principles and Applications"
+              - generic [ref=e292]:
+                - text: View More
+                - link "Journals" [ref=e293] [cursor=pointer]:
+                  - /url: /browse/periodicals/title?queryText=Machine Learning
+                - text: and
+                - link "Conferences" [ref=e294] [cursor=pointer]:
+                  - /url: /browse/conferences/title?queryText=Machine Learning
+            - generic [ref=e295]:
+              - generic [ref=e296]:
+                - heading "Search" [level=2] [ref=e297]
+                - radiogroup "Search by documents and images" [ref=e302]:
+                  - radio "Documents" [checked] [ref=e303] [cursor=pointer]
+                  - radio "Images (Beta)" [ref=e304] [cursor=pointer]
+              - generic [ref=e308]:
+                - heading "Show" [level=2] [ref=e310]
+                - generic [ref=e312]:
+                  - generic [ref=e315] [cursor=pointer]:
+                    - radio "All Results" [checked] [ref=e316]
+                    - generic [ref=e317]: All Results
+                  - generic [ref=e318]:
+                    - generic [ref=e320] [cursor=pointer]:
+                      - radio "Subscribed Content" [ref=e321]
+                      - generic [ref=e322]: Subscribed Content
+                    - link "Also includes Open Access content" [ref=e324] [cursor=pointer]:
+                      - /url: javascript:void()
+                      - generic [ref=e325]: 
+                  - generic [ref=e328] [cursor=pointer]:
+                    - radio "Open Access Only" [ref=e329]
+                    - generic [ref=e330]: Open Access Only
+              - list [ref=e333]:
+                - listitem [ref=e334]:
+                  - generic [ref=e335]:
+                    - heading "Year " [level=2] [ref=e337] [cursor=pointer]:
+                      - button "Year " [expanded] [ref=e338]:
+                        - generic [ref=e339]: Year
+                        - generic [ref=e340]: 
+                    - generic [ref=e342]:
+                      - generic [ref=e343]:
+                        - generic [ref=e345]:
+                          - radio "Range" [checked] [ref=e346]
+                          - generic [ref=e347]: Range
+                        - generic [ref=e349]:
+                          - radio "Single Year" [ref=e350]
+                          - generic [ref=e351]: Single Year
+                      - generic [ref=e353]:
+                        - textbox "Enter start year of range" [ref=e357]: "1905"
+                        - textbox "Enter end year of range" [ref=e361]: "2026"
+                    - generic [ref=e362]:
+                      - button "Clear" [ref=e363] [cursor=pointer]
+                      - button "Apply" [disabled] [ref=e364]
+                - listitem [ref=e365]:
+                  - heading "Author " [level=2] [ref=e368] [cursor=pointer]:
+                    - button "Author " [ref=e369]:
+                      - generic [ref=e370]: Author
+                      - generic [ref=e371]: 
+                - listitem [ref=e372]:
+                  - heading "Affiliation " [level=2] [ref=e375] [cursor=pointer]:
+                    - button "Affiliation " [ref=e376]:
+                      - generic [ref=e377]: Affiliation
+                      - generic [ref=e378]: 
+                - listitem [ref=e379]:
+                  - heading "Publication Title " [level=2] [ref=e382] [cursor=pointer]:
+                    - button "Publication Title " [ref=e383]:
+                      - generic [ref=e384]: Publication Title
+                      - generic [ref=e385]: 
+                - listitem [ref=e386]:
+                  - heading "Publisher " [level=2] [ref=e389] [cursor=pointer]:
+                    - button "Publisher " [ref=e390]:
+                      - generic [ref=e391]: Publisher
+                      - generic [ref=e392]: 
+                - listitem [ref=e393]:
+                  - heading "Supplemental Items " [level=2] [ref=e396] [cursor=pointer]:
+                    - button "Supplemental Items " [ref=e397]:
+                      - generic [ref=e398]: Supplemental Items
+                      - generic [ref=e399]: 
+                - listitem [ref=e400]:
+                  - heading "Conference Location " [level=2] [ref=e403] [cursor=pointer]:
+                    - button "Conference Location " [ref=e404]:
+                      - generic [ref=e405]: Conference Location
+                      - generic [ref=e406]: 
+                - listitem [ref=e407]:
+                  - heading "Publication Topics " [level=2] [ref=e410] [cursor=pointer]:
+                    - button "Publication Topics " [ref=e411]:
+                      - generic [ref=e412]: Publication Topics
+                      - generic [ref=e413]: 
+                - listitem [ref=e414]:
+                  - heading "Standard Status " [level=2] [ref=e417] [cursor=pointer]:
+                    - button "Standard Status " [ref=e418]:
+                      - generic [ref=e419]: Standard Status
+                      - generic [ref=e420]: 
+                - listitem [ref=e421]:
+                  - heading "Standard Type " [level=2] [ref=e424] [cursor=pointer]:
+                    - button "Standard Type " [ref=e425]:
+                      - generic [ref=e426]: Standard Type
+                      - generic [ref=e427]: 
+            - generic [ref=e120]:
+              - generic [ref=e121]:
+                - generic [ref=e429]:
+                  - generic [ref=e430]:
+                    - generic [ref=e431]:
+                      - text: Sign In to Save Your Search
+                      - link "Learn more about saved searches" [ref=e433] [cursor=pointer]:
+                        - /url: /Xplorehelp/personalization-settings/saved-searches
+                        - generic [ref=e434]: 
+                    - button "Close modal" [ref=e436] [cursor=pointer]:
+                      - generic [ref=e437]: 
+                  - paragraph [ref=e438]: Get notified when new research is published matching your search criteria.
+                  - generic [ref=e439]:
+                    - generic [ref=e442]:
+                      - textbox "Enter email address for personal sign in" [ref=e443]
+                      - generic:
+                        - generic: "*Email Address"
+                    - generic [ref=e446]:
+                      - textbox "Enter password for personal sign in" [ref=e447]
+                      - generic:
+                        - generic: "*Password"
+                    - button "Sign In" [ref=e449] [cursor=pointer]:
+                      - generic [ref=e450]: Sign In
+                  - generic [ref=e452]:
+                    - link "Forgot Password?" [ref=e453] [cursor=pointer]:
+                      - /url: https://www.ieee.org/profile/public/forgotpassword/forgotUsernamePassword.html?sourceCode=xplore&signinurl=https%3A%2F%2Fieeexplore.ieee.org%2FXplore%2Flogin.jsp%3Furl%3D%2FXplore%2Fhome.jsp%26reason%3Dauthenticate&url=https%3A%2F%2Fieeexplore.ieee.org%2FXplore%2Flogin.jsp%3Furl%3D%2Fsearch%2Fsearchresult.jsp%3Fnewsearch%3Dtrue%26queryText%3DMachine%2520Learning
+                    - text: "|"
+                    - link "Create Account" [ref=e454] [cursor=pointer]:
+                      - /url: https://www.ieee.org/profile/public/createwebaccount/showCreateAccount.html?ShowMGAMarkeatbilityOptIn=true&sourceCode=xplore&car=IEEE-Xplore&autoSignin=Y&signinurl=https%3A%2F%2Fieeexplore.ieee.org%2FXplore%2Flogin.jsp%3Furl%3D%2FXplore%2Fhome.jsp%26reason%3Dauthenticate&url=https://ieeexplore.ieee.org/search/searchresult.jsp?newsearch%3Dtrue%26queryText%3DMachine%2520Learning
+                - generic [ref=e455]:
+                  - generic [ref=e456]:
+                    - checkbox "Select All on Page" [ref=e457]
+                    - text: Select All on Page
+                  - generic [ref=e459]:
+                    - generic [ref=e460]: Sort By
+                    - button "Relevance" [ref=e461] [cursor=pointer]:
+                      - generic [ref=e462]: Relevance
+                - heading "Results" [level=2] [ref=e126]
+                - generic [ref=e464]:
+                  - generic [ref=e465]:
+                    - generic [ref=e466]:
+                      - checkbox "Select search result" [ref=e468]
+                      - generic [ref=e469]:
+                        - 'heading "Machine Learning-Enabled Smart Transit: Real-Time Bus Tracking System for Enhanced Urban Mobility" [level=3] [ref=e470]':
+                          - 'link "Machine Learning-Enabled Smart Transit: Real-Time Bus Tracking System for Enhanced Urban Mobility" [ref=e471] [cursor=pointer]':
+                            - /url: /document/11007439/
+                        - paragraph [ref=e473]:
+                          - generic [ref=e474]:
+                            - link "Nadimpalli Madana Kailash Varma" [ref=e475] [cursor=pointer]:
+                              - /url: /author/391049313877833
+                            - text: ;
+                          - generic [ref=e476]:
+                            - link "Md. Irfan Ahmed" [ref=e477] [cursor=pointer]:
+                              - /url: /author/37089545795
+                            - text: ;
+                          - generic [ref=e478]:
+                            - link "G. Madhusudhan" [ref=e479] [cursor=pointer]:
+                              - /url: /author/379038290417678
+                            - text: ;
+                          - generic [ref=e480]:
+                            - link "G. Rishab Babu" [ref=e481] [cursor=pointer]:
+                              - /url: /author/958417134097511
+                            - text: ;
+                          - generic [ref=e482]:
+                            - link "T. Shalini" [ref=e483] [cursor=pointer]:
+                              - /url: /author/37089835691
+                            - text: ;
+                          - link "Fatima Unnisa" [ref=e485] [cursor=pointer]:
+                            - /url: /author/37089902917
+                        - generic [ref=e486]:
+                          - link "2024 Intelligent Systems and Machine Learning Conference (ISML)" [ref=e487] [cursor=pointer]:
+                            - /url: /xpl/conhome/11007291/proceeding
+                          - generic [ref=e488]:
+                            - text: "Year: 2024"
+                            - generic [ref=e489]: "| Conference Paper"
+                            - generic [ref=e490]:
+                              - text: "|"
+                              - 'button "Publisher: IEEE" [ref=e493] [cursor=pointer]'
+                          - generic [ref=e494]:
+                            - text: "Cited by:"
+                            - link "Papers (3)" [ref=e496] [cursor=pointer]:
+                              - /url: /document/11007439/citations?tabFilter=papers#citations
+                      - img "Included in Your Digital Subscription" [ref=e501]: 
+                    - list [ref=e503]:
+                      - listitem [ref=e504]:
+                        - button " Abstract" [ref=e505] [cursor=pointer]:
+                          - generic [ref=e506]: 
+                          - generic [ref=e507]: Abstract
+                      - listitem [ref=e508]:
+                        - link "HTML" [ref=e511] [cursor=pointer]:
+                          - /url: /document/11007439/
+                          - generic [ref=e512]: HTML
+                      - listitem [ref=e513]:
+                        - link "PDF" [ref=e517] [cursor=pointer]:
+                          - /url: /stamp/stamp.jsp?tp=&arnumber=11007439
+                          - generic [ref=e518]: 
+                      - listitem [ref=e519]:
+                        - link "Copyright request permission for reuse" [ref=e522] [cursor=pointer]:
+                          - /url: javascript:void()
+                          - generic [ref=e523]: 
+                  - text: 
+                - generic [ref=e525]:
+                  - generic [ref=e526]:
+                    - generic [ref=e527]:
+                      - checkbox "Select search result" [ref=e529]
+                      - generic [ref=e530]:
+                        - heading "IEEE Draft Guide for Architectural Framework and Application of Federated Machine Learning" [level=3] [ref=e531]:
+                          - link "IEEE Draft Guide for Architectural Framework and Application of Federated Machine Learning" [ref=e532] [cursor=pointer]:
+                            - /url: /document/9134988/
+                        - generic [ref=e533]:
+                          - link "IEEE P3652.1/D6, April 2020" [ref=e534] [cursor=pointer]:
+                            - /url: /document/9134988/
+                          - link "Standards Versions" [ref=e537] [cursor=pointer]:
+                            - /url: /document/9134988/versions
+                            - generic [ref=e538]: 
+                            - text: Versions
+                          - generic [ref=e539]:
+                            - text: "Year: 2020"
+                            - generic [ref=e540]: "| Standard"
+                            - generic [ref=e541]:
+                              - text: "|"
+                              - 'button "Publisher: IEEE" [ref=e544] [cursor=pointer]'
+                      - img "Full text access may be available." [ref=e549]: 
+                    - list [ref=e551]:
+                      - listitem [ref=e552]:
+                        - button " Abstract" [ref=e553] [cursor=pointer]:
+                          - generic [ref=e554]: 
+                          - generic [ref=e555]: Abstract
+                      - listitem [ref=e556]:
+                        - link "PDF" [ref=e560] [cursor=pointer]:
+                          - /url: /stamp/stamp.jsp?tp=&arnumber=9134988
+                          - generic [ref=e561]: 
+                      - listitem [ref=e562]:
+                        - link "Copyright request permission for reuse" [ref=e565] [cursor=pointer]:
+                          - /url: javascript:void()
+                          - generic [ref=e566]: 
+                  - text: 
+                - generic [ref=e568]:
+                  - generic [ref=e569]:
+                    - generic [ref=e570]:
+                      - checkbox "Select search result" [ref=e572]
+                      - generic [ref=e573]:
+                        - 'heading "Unveiling the Potential of Machine Learning: Harnessing Machine Learning for Enhanced Coronary Heart Disease Detection and Intervention" [level=3] [ref=e574]':
+                          - 'link "Unveiling the Potential of Machine Learning: Harnessing Machine Learning for Enhanced Coronary Heart Disease Detection and Intervention" [ref=e575] [cursor=pointer]':
+                            - /url: /document/10911700/
+                        - paragraph [ref=e577]:
+                          - generic [ref=e578]:
+                            - link "Harshali Hemant Vadher" [ref=e579] [cursor=pointer]:
+                              - /url: /author/643642094257218
+                            - text: ;
+                          - generic [ref=e580]:
+                            - link "Adla Aryan" [ref=e581] [cursor=pointer]:
+                              - /url: /author/906810402748180
+                            - text: ;
+                          - generic [ref=e582]:
+                            - link "Kuruva Vamshi" [ref=e583] [cursor=pointer]:
+                              - /url: /author/936833505174724
+                            - text: ;
+                          - generic [ref=e584]:
+                            - link "Ramojula Rajashekar" [ref=e585] [cursor=pointer]:
+                              - /url: /author/421951012975453
+                            - text: ;
+                          - generic [ref=e586]:
+                            - link "Degavath Ashish" [ref=e587] [cursor=pointer]:
+                              - /url: /author/499874795698050
+                            - text: ;
+                          - link "Gagan Deep Arora" [ref=e589] [cursor=pointer]:
+                            - /url: /author/37089766345
+                        - generic [ref=e590]:
+                          - link "2024 4th International Conference on Advancement in Electronics & Communication Engineering (AECE)" [ref=e591] [cursor=pointer]:
+                            - /url: /xpl/conhome/10910286/proceeding
+                          - generic [ref=e592]:
+                            - text: "Year: 2024"
+                            - generic [ref=e593]: "| Conference Paper"
+                            - generic [ref=e594]:
+                              - text: "|"
+                              - 'button "Publisher: IEEE" [ref=e597] [cursor=pointer]'
+                          - generic [ref=e598]:
+                            - text: "Cited by:"
+                            - link "Papers (6)" [ref=e600] [cursor=pointer]:
+                              - /url: /document/10911700/citations?tabFilter=papers#citations
+                      - img "Included in Your Digital Subscription" [ref=e605]: 
+                    - list [ref=e607]:
+                      - listitem [ref=e608]:
+                        - button " Abstract" [ref=e609] [cursor=pointer]:
+                          - generic [ref=e610]: 
+                          - generic [ref=e611]: Abstract
+                      - listitem [ref=e612]:
+                        - link "HTML" [ref=e615] [cursor=pointer]:
+                          - /url: /document/10911700/
+                          - generic [ref=e616]: HTML
+                      - listitem [ref=e617]:
+                        - link "PDF" [ref=e621] [cursor=pointer]:
+                          - /url: /stamp/stamp.jsp?tp=&arnumber=10911700
+                          - generic [ref=e622]: 
+                      - listitem [ref=e623]:
+                        - link "Copyright request permission for reuse" [ref=e626] [cursor=pointer]:
+                          - /url: javascript:void()
+                          - generic [ref=e627]: 
+                  - text: 
+                - generic [ref=e629]:
+                  - generic [ref=e630]:
+                    - generic [ref=e631]:
+                      - checkbox "Select search result" [ref=e633]
+                      - generic [ref=e634]:
+                        - heading "IEEE Approved Draft Guide for Architectural Framework and Application of Federated Machine Learning" [level=3] [ref=e635]:
+                          - link "IEEE Approved Draft Guide for Architectural Framework and Application of Federated Machine Learning" [ref=e636] [cursor=pointer]:
+                            - /url: /document/9154804/
+                        - generic [ref=e637]:
+                          - link "IEEE P3652.1/D6.1, July 2020" [ref=e638] [cursor=pointer]:
+                            - /url: /document/9154804/
+                          - link "Standards Versions" [ref=e641] [cursor=pointer]:
+                            - /url: /document/9154804/versions
+                            - generic [ref=e642]: 
+                            - text: Versions
+                          - generic [ref=e643]:
+                            - text: "Year: 2020"
+                            - generic [ref=e644]: "| Standard"
+                            - generic [ref=e645]:
+                              - text: "|"
+                              - 'button "Publisher: IEEE" [ref=e648] [cursor=pointer]'
+                      - img "Full text access may be available." [ref=e653]: 
+                    - list [ref=e655]:
+                      - listitem [ref=e656]:
+                        - button " Abstract" [ref=e657] [cursor=pointer]:
+                          - generic [ref=e658]: 
+                          - generic [ref=e659]: Abstract
+                      - listitem [ref=e660]:
+                        - link "PDF" [ref=e664] [cursor=pointer]:
+                          - /url: /stamp/stamp.jsp?tp=&arnumber=9154804
+                          - generic [ref=e665]: 
+                      - listitem [ref=e666]:
+                        - link "Copyright request permission for reuse" [ref=e669] [cursor=pointer]:
+                          - /url: javascript:void()
+                          - generic [ref=e670]: 
+                  - text: 
+                - generic [ref=e672]:
+                  - generic [ref=e673]:
+                    - generic [ref=e674]:
+                      - checkbox "Select search result" [ref=e676]
+                      - generic [ref=e677]:
+                        - 'heading "Human-in-the-Loop Machine Learning: Active learning and annotation for human-centered AI" [level=3] [ref=e678]':
+                          - 'link "Human-in-the-Loop Machine Learning: Active learning and annotation for human-centered AI" [ref=e679] [cursor=pointer]':
+                            - /url: /document/10280384/
+                        - paragraph [ref=e681]:
+                          - button "Rob Munro" [ref=e684] [cursor=pointer]
+                        - generic [ref=e686]:
+                          - text: "Year: 2021"
+                          - generic [ref=e687]: "| Book"
+                          - generic [ref=e688]:
+                            - text: "|"
+                            - 'button "Publisher: Manning" [ref=e691] [cursor=pointer]'
+                      - img "Full text access may be available." [ref=e696]: 
+                    - list [ref=e698]:
+                      - listitem [ref=e699]:
+                        - button " Abstract" [ref=e700] [cursor=pointer]:
+                          - generic [ref=e701]: 
+                          - generic [ref=e702]: Abstract
+                      - listitem [ref=e703]:
+                        - link "PDF" [ref=e707] [cursor=pointer]:
+                          - /url: /xpl/ebooks/bookPdfWithBanner.jsp?fileName=10280384.pdf&bkn=10280384&pdfType=book
+                          - generic [ref=e708]: 
+                      - listitem [ref=e709]:
+                        - link "IEEE is not the copyright holder of this material" [ref=e712] [cursor=pointer]:
+                          - /url: javascript:void
+                          - generic "IEEE is not the copyright holder of this material" [ref=e713]: 
+                  - text: 
+                - generic [ref=e715]:
+                  - generic [ref=e716]:
+                    - generic [ref=e717]:
+                      - checkbox "Select search result" [ref=e719]
+                      - generic [ref=e720]:
+                        - 'heading "Sentiment Analysis of Machine Learning Algorithms: A Transformer-Based Approach" [level=3] [ref=e721]':
+                          - 'link "Sentiment Analysis of Machine Learning Algorithms: A Transformer-Based Approach" [ref=e722] [cursor=pointer]':
+                            - /url: /document/11007454/
+                        - paragraph [ref=e724]:
+                          - generic [ref=e725]:
+                            - link "Nadimpallli Madana Kailash Varma" [ref=e726] [cursor=pointer]:
+                              - /url: /author/391049313877833
+                            - text: ;
+                          - generic [ref=e727]:
+                            - link "Sudabathula Vijay Sai Kumar" [ref=e728] [cursor=pointer]:
+                              - /url: /author/394907798624893
+                            - text: ;
+                          - generic [ref=e729]:
+                            - link "Sri Harsh Mattaparty" [ref=e730] [cursor=pointer]:
+                              - /url: /author/559698366273548
+                            - text: ;
+                          - generic [ref=e731]:
+                            - link "Shifa Ismail" [ref=e732] [cursor=pointer]:
+                              - /url: /author/174235325435001
+                            - text: ;
+                          - generic [ref=e733]:
+                            - link "Marisetti Harshini" [ref=e734] [cursor=pointer]:
+                              - /url: /author/245202309956215
+                            - text: ;
+                          - link "Syed Ahmeduddin" [ref=e736] [cursor=pointer]:
+                            - /url: /author/191927950172949
+                        - generic [ref=e737]:
+                          - link "2024 Intelligent Systems and Machine Learning Conference (ISML)" [ref=e738] [cursor=pointer]:
+                            - /url: /xpl/conhome/11007291/proceeding
+                          - generic [ref=e739]:
+                            - text: "Year: 2024"
+                            - generic [ref=e740]: "| Conference Paper"
+                            - generic [ref=e741]:
+                              - text: "|"
+                              - 'button "Publisher: IEEE" [ref=e744] [cursor=pointer]'
+                          - generic [ref=e745]:
+                            - text: "Cited by:"
+                            - link "Papers (2)" [ref=e747] [cursor=pointer]:
+                              - /url: /document/11007454/citations?tabFilter=papers#citations
+                      - img "Included in Your Digital Subscription" [ref=e752]: 
+                    - list [ref=e754]:
+                      - listitem [ref=e755]:
+                        - button " Abstract" [ref=e756] [cursor=pointer]:
+                          - generic [ref=e757]: 
+                          - generic [ref=e758]: Abstract
+                      - listitem [ref=e759]:
+                        - link "HTML" [ref=e762] [cursor=pointer]:
+                          - /url: /document/11007454/
+                          - generic [ref=e763]: HTML
+                      - listitem [ref=e764]:
+                        - link "PDF" [ref=e768] [cursor=pointer]:
+                          - /url: /stamp/stamp.jsp?tp=&arnumber=11007454
+                          - generic [ref=e769]: 
+                      - listitem [ref=e770]:
+                        - link "Copyright request permission for reuse" [ref=e773] [cursor=pointer]:
+                          - /url: javascript:void()
+                          - generic [ref=e774]: 
+                  - text: 
+                - generic [ref=e776]:
+                  - generic [ref=e777]:
+                    - generic [ref=e778]:
+                      - checkbox "Select search result" [ref=e780]
+                      - generic [ref=e781]:
+                        - 'heading "Improving Software Defects Detection: An In-Depth Analysis of Machine Learning Methods and Static Analysis Tools for Greater Accuracy" [level=3] [ref=e782]':
+                          - 'link "Improving Software Defects Detection: An In-Depth Analysis of Machine Learning Methods and Static Analysis Tools for Greater Accuracy" [ref=e783] [cursor=pointer]':
+                            - /url: /document/10968410/
+                        - paragraph [ref=e785]:
+                          - generic [ref=e786]:
+                            - link "Veer Bobade" [ref=e787] [cursor=pointer]:
+                              - /url: /author/597094605916306
+                            - text: ;
+                          - link "Chetan Puri" [ref=e789] [cursor=pointer]:
+                            - /url: /author/804933142286536
+                        - generic [ref=e790]:
+                          - link "2025 International Conference on Machine Learning and Autonomous Systems (ICMLAS)" [ref=e791] [cursor=pointer]:
+                            - /url: /xpl/conhome/10967566/proceeding
+                          - generic [ref=e792]:
+                            - text: "Year: 2025"
+                            - generic [ref=e793]: "| Conference Paper"
+                            - generic [ref=e794]:
+                              - text: "|"
+                              - 'button "Publisher: IEEE" [ref=e797] [cursor=pointer]'
+                          - generic [ref=e798]:
+                            - text: "Cited by:"
+                            - link "Papers (2)" [ref=e800] [cursor=pointer]:
+                              - /url: /document/10968410/citations?tabFilter=papers#citations
+                      - img "Included in Your Digital Subscription" [ref=e805]: 
+                    - list [ref=e807]:
+                      - listitem [ref=e808]:
+                        - button " Abstract" [ref=e809] [cursor=pointer]:
+                          - generic [ref=e810]: 
+                          - generic [ref=e811]: Abstract
+                      - listitem [ref=e812]:
+                        - link "HTML" [ref=e815] [cursor=pointer]:
+                          - /url: /document/10968410/
+                          - generic [ref=e816]: HTML
+                      - listitem [ref=e817]:
+                        - link "PDF" [ref=e821] [cursor=pointer]:
+                          - /url: /stamp/stamp.jsp?tp=&arnumber=10968410
+                          - generic [ref=e822]: 
+                      - listitem [ref=e823]:
+                        - link "Copyright request permission for reuse" [ref=e826] [cursor=pointer]:
+                          - /url: javascript:void()
+                          - generic [ref=e827]: 
+                  - text: 
+                - generic [ref=e829]:
+                  - generic [ref=e830]:
+                    - generic [ref=e831]:
+                      - checkbox "Select search result" [ref=e833]
+                      - generic [ref=e834]:
+                        - heading "Machine Learning with TensorFlow, Second Edition" [level=3] [ref=e835]:
+                          - link "Machine Learning with TensorFlow, Second Edition" [ref=e836] [cursor=pointer]:
+                            - /url: /document/10280532/
+                        - paragraph [ref=e838]:
+                          - button "Chris Mattmann" [ref=e841] [cursor=pointer]
+                        - generic [ref=e843]:
+                          - text: "Year: 2020"
+                          - generic [ref=e844]: "| Book"
+                          - generic [ref=e845]:
+                            - text: "|"
+                            - 'button "Publisher: Manning" [ref=e848] [cursor=pointer]'
+                      - img "Full text access may be available." [ref=e853]: 
+                    - list [ref=e855]:
+                      - listitem [ref=e856]:
+                        - button " Abstract" [ref=e857] [cursor=pointer]:
+                          - generic [ref=e858]: 
+                          - generic [ref=e859]: Abstract
+                      - listitem [ref=e860]:
+                        - link "PDF" [ref=e864] [cursor=pointer]:
+                          - /url: /xpl/ebooks/bookPdfWithBanner.jsp?fileName=10280532.pdf&bkn=10280532&pdfType=book
+                          - generic [ref=e865]: 
+                      - listitem [ref=e866]:
+                        - link "IEEE is not the copyright holder of this material" [ref=e869] [cursor=pointer]:
+                          - /url: javascript:void
+                          - generic "IEEE is not the copyright holder of this material" [ref=e870]: 
+                  - text: 
+                - generic [ref=e872]:
+                  - generic [ref=e873]:
+                    - generic [ref=e874]:
+                      - checkbox "Select search result" [ref=e876]
+                      - generic [ref=e877]:
+                        - heading "Unsupervised Machine Learning Methods for Artifact Removal in Electrodermal Activity" [level=3] [ref=e878]:
+                          - link "Unsupervised Machine Learning Methods for Artifact Removal in Electrodermal Activity" [ref=e879] [cursor=pointer]:
+                            - /url: /document/9630535/
+                        - paragraph [ref=e881]:
+                          - generic [ref=e882]:
+                            - link "Sandya Subramanian" [ref=e883] [cursor=pointer]:
+                              - /url: /author/37086494156
+                            - text: ;
+                          - generic [ref=e884]:
+                            - link "Bryan Tseng" [ref=e885] [cursor=pointer]:
+                              - /url: /author/37089184266
+                            - text: ;
+                          - generic [ref=e886]:
+                            - link "Riccardo Barbieri" [ref=e887] [cursor=pointer]:
+                              - /url: /author/37299109300
+                            - text: ;
+                          - link "Emery N Brown" [ref=e889] [cursor=pointer]:
+                            - /url: /author/37275429600
+                        - generic [ref=e890]:
+                          - link "2021 43rd Annual International Conference of the IEEE Engineering in Medicine & Biology Society (EMBC)" [ref=e891] [cursor=pointer]:
+                            - /url: /xpl/conhome/9629355/proceeding
+                          - generic [ref=e892]:
+                            - text: "Year: 2021"
+                            - generic [ref=e893]: "| Conference Paper"
+                            - generic [ref=e894]:
+                              - text: "|"
+                              - 'button "Publisher: IEEE" [ref=e897] [cursor=pointer]'
+                          - generic [ref=e898]:
+                            - text: "Cited by:"
+                            - link "Papers (19)" [ref=e900] [cursor=pointer]:
+                              - /url: /document/9630535/citations?tabFilter=papers#citations
+                      - img "Included in Your Digital Subscription" [ref=e905]: 
+                    - list [ref=e907]:
+                      - listitem [ref=e908]:
+                        - button " Abstract" [ref=e909] [cursor=pointer]:
+                          - generic [ref=e910]: 
+                          - generic [ref=e911]: Abstract
+                      - listitem [ref=e912]:
+                        - link "HTML" [ref=e915] [cursor=pointer]:
+                          - /url: /document/9630535/
+                          - generic [ref=e916]: HTML
+                      - listitem [ref=e917]:
+                        - link "PDF" [ref=e921] [cursor=pointer]:
+                          - /url: /stamp/stamp.jsp?tp=&arnumber=9630535
+                          - generic [ref=e922]: 
+                      - listitem [ref=e923]:
+                        - link "Copyright request permission for reuse" [ref=e926] [cursor=pointer]:
+                          - /url: javascript:void()
+                          - generic [ref=e927]: 
+                  - text: 
+                - generic [ref=e929]:
+                  - generic [ref=e930]:
+                    - generic [ref=e931]:
+                      - checkbox "Select search result" [ref=e933]
+                      - generic [ref=e934]:
+                        - 'heading "Predicting Urban Land Cover Using Classification: A Machine Learning Approach" [level=3] [ref=e935]':
+                          - 'link "Predicting Urban Land Cover Using Classification: A Machine Learning Approach" [ref=e936] [cursor=pointer]':
+                            - /url: /document/10461930/
+                        - paragraph [ref=e938]:
+                          - generic [ref=e939]:
+                            - link "Tanush Jadhav" [ref=e940] [cursor=pointer]:
+                              - /url: /author/930310808898041
+                            - text: ;
+                          - generic [ref=e941]:
+                            - link "Tanishq" [ref=e942] [cursor=pointer]:
+                              - /url: /author/424809293799639
+                            - text: ;
+                          - generic [ref=e943]:
+                            - link "Spoorthi Jagadish" [ref=e944] [cursor=pointer]:
+                              - /url: /author/983764830939863
+                            - text: ;
+                          - generic [ref=e945]:
+                            - link "Mayur Gaikwad" [ref=e946] [cursor=pointer]:
+                              - /url: /author/37086820610
+                            - text: ;
+                          - generic [ref=e947]:
+                            - link "Shivali Wagle" [ref=e948] [cursor=pointer]:
+                              - /url: /author/37088937443
+                            - text: ;
+                          - generic [ref=e949]:
+                            - link "Ruchi Jayaswal" [ref=e950] [cursor=pointer]:
+                              - /url: /author/37086332394
+                            - text: ;
+                          - link "Shruti Patil" [ref=e952] [cursor=pointer]:
+                            - /url: /author/37088932489
+                        - generic [ref=e953]:
+                          - link "2023 IEEE 11th Region 10 Humanitarian Technology Conference (R10-HTC)" [ref=e954] [cursor=pointer]:
+                            - /url: /xpl/conhome/10461726/proceeding
+                          - generic [ref=e955]:
+                            - text: "Year: 2023"
+                            - generic [ref=e956]: "| Conference Paper"
+                            - generic [ref=e957]:
+                              - text: "|"
+                              - 'button "Publisher: IEEE" [ref=e960] [cursor=pointer]'
+                          - generic [ref=e961]:
+                            - text: "Cited by:"
+                            - link "Papers (8)" [ref=e963] [cursor=pointer]:
+                              - /url: /document/10461930/citations?tabFilter=papers#citations
+                      - img "Included in Your Digital Subscription" [ref=e968]: 
+                    - list [ref=e970]:
+                      - listitem [ref=e971]:
+                        - button " Abstract" [ref=e972] [cursor=pointer]:
+                          - generic [ref=e973]: 
+                          - generic [ref=e974]: Abstract
+                      - listitem [ref=e975]:
+                        - link "HTML" [ref=e978] [cursor=pointer]:
+                          - /url: /document/10461930/
+                          - generic [ref=e979]: HTML
+                      - listitem [ref=e980]:
+                        - link "PDF" [ref=e984] [cursor=pointer]:
+                          - /url: /stamp/stamp.jsp?tp=&arnumber=10461930
+                          - generic [ref=e985]: 
+                      - listitem [ref=e986]:
+                        - link "Copyright request permission for reuse" [ref=e989] [cursor=pointer]:
+                          - /url: javascript:void()
+                          - generic [ref=e990]: 
+                  - text: 
+                - generic [ref=e992]:
+                  - generic [ref=e993]:
+                    - generic [ref=e994]:
+                      - checkbox "Select search result" [ref=e996]
+                      - generic [ref=e997]:
+                        - 'heading "Unlocking Stock Market Potential: Machine Learning Predictions for NIFTY50''s Most Profitable Companies" [level=3] [ref=e998]':
+                          - 'link "Unlocking Stock Market Potential: Machine Learning Predictions for NIFTY50''s Most Profitable Companies" [ref=e999] [cursor=pointer]':
+                            - /url: /document/10911573/
+                        - paragraph [ref=e1001]:
+                          - generic [ref=e1002]:
+                            - link "Preetham Sagar Sanda" [ref=e1003] [cursor=pointer]:
+                              - /url: /author/268284502687004
+                            - text: ;
+                          - generic [ref=e1004]:
+                            - link "Revanth Thota" [ref=e1005] [cursor=pointer]:
+                              - /url: /author/428799524511057
+                            - text: ;
+                          - generic [ref=e1006]:
+                            - link "Akhil Kodimala" [ref=e1007] [cursor=pointer]:
+                              - /url: /author/528565856362977
+                            - text: ;
+                          - generic [ref=e1008]:
+                            - link "Rishab Babu Gadari" [ref=e1009] [cursor=pointer]:
+                              - /url: /author/333462161763767
+                            - text: ;
+                          - generic [ref=e1010]:
+                            - link "Gagandeep Aurora" [ref=e1011] [cursor=pointer]:
+                              - /url: /author/970428483839281
+                            - text: ;
+                          - link "Naga Padmaja" [ref=e1013] [cursor=pointer]:
+                            - /url: /author/605495314479520
+                        - generic [ref=e1014]:
+                          - link "2024 4th International Conference on Advancement in Electronics & Communication Engineering (AECE)" [ref=e1015] [cursor=pointer]:
+                            - /url: /xpl/conhome/10910286/proceeding
+                          - generic [ref=e1016]:
+                            - text: "Year: 2024"
+                            - generic [ref=e1017]: "| Conference Paper"
+                            - generic [ref=e1018]:
+                              - text: "|"
+                              - 'button "Publisher: IEEE" [ref=e1021] [cursor=pointer]'
+                      - img "Included in Your Digital Subscription" [ref=e1026]: 
+                    - list [ref=e1028]:
+                      - listitem [ref=e1029]:
+                        - button " Abstract" [ref=e1030] [cursor=pointer]:
+                          - generic [ref=e1031]: 
+                          - generic [ref=e1032]: Abstract
+                      - listitem [ref=e1033]:
+                        - link "HTML" [ref=e1036] [cursor=pointer]:
+                          - /url: /document/10911573/
+                          - generic [ref=e1037]: HTML
+                      - listitem [ref=e1038]:
+                        - link "PDF" [ref=e1042] [cursor=pointer]:
+                          - /url: /stamp/stamp.jsp?tp=&arnumber=10911573
+                          - generic [ref=e1043]: 
+                      - listitem [ref=e1044]:
+                        - link "Copyright request permission for reuse" [ref=e1047] [cursor=pointer]:
+                          - /url: javascript:void()
+                          - generic [ref=e1048]: 
+                  - text: 
+                - generic [ref=e1050]:
+                  - generic [ref=e1051]:
+                    - generic [ref=e1052]:
+                      - checkbox "Select search result" [ref=e1054]
+                      - generic [ref=e1055]:
+                        - heading "A Survey on Machine Learning Approaches and Its Techniques:" [level=3] [ref=e1056]:
+                          - link "A Survey on Machine Learning Approaches and Its Techniques:" [ref=e1057] [cursor=pointer]:
+                            - /url: /document/9087123/
+                        - paragraph [ref=e1059]:
+                          - generic [ref=e1060]:
+                            - link "Thomas Rincy N" [ref=e1061] [cursor=pointer]:
+                              - /url: /author/37088637940
+                            - text: ;
+                          - link "Roopam Gupta" [ref=e1063] [cursor=pointer]:
+                            - /url: /author/37088397104
+                        - generic [ref=e1064]:
+                          - link "2020 IEEE International Students' Conference on Electrical,Electronics and Computer Science (SCEECS)" [ref=e1065] [cursor=pointer]:
+                            - /url: /xpl/conhome/9082706/proceeding
+                          - generic [ref=e1066]:
+                            - text: "Year: 2020"
+                            - generic [ref=e1067]: "| Conference Paper"
+                            - generic [ref=e1068]:
+                              - text: "|"
+                              - 'button "Publisher: IEEE" [ref=e1071] [cursor=pointer]'
+                          - generic [ref=e1072]:
+                            - text: "Cited by:"
+                            - link "Papers (70)" [ref=e1074] [cursor=pointer]:
+                              - /url: /document/9087123/citations?tabFilter=papers#citations
+                      - img "Included in Your Digital Subscription" [ref=e1079]: 
+                    - list [ref=e1081]:
+                      - listitem [ref=e1082]:
+                        - button " Abstract" [ref=e1083] [cursor=pointer]:
+                          - generic [ref=e1084]: 
+                          - generic [ref=e1085]: Abstract
+                      - listitem [ref=e1086]:
+                        - link "HTML" [ref=e1089] [cursor=pointer]:
+                          - /url: /document/9087123/
+                          - generic [ref=e1090]: HTML
+                      - listitem [ref=e1091]:
+                        - link "PDF" [ref=e1095] [cursor=pointer]:
+                          - /url: /stamp/stamp.jsp?tp=&arnumber=9087123
+                          - generic [ref=e1096]: 
+                      - listitem [ref=e1097]:
+                        - link "Copyright request permission for reuse" [ref=e1100] [cursor=pointer]:
+                          - /url: javascript:void()
+                          - generic [ref=e1101]: 
+                  - text: 
+                - generic [ref=e1103]:
+                  - generic [ref=e1104]:
+                    - generic [ref=e1105]:
+                      - checkbox "Select search result" [ref=e1107]
+                      - generic [ref=e1108]:
+                        - heading "A Comprehensive Review of Various Machine Learning Techniques" [level=3] [ref=e1109]:
+                          - link "A Comprehensive Review of Various Machine Learning Techniques" [ref=e1110] [cursor=pointer]:
+                            - /url: /document/10951821/
+                        - paragraph [ref=e1112]:
+                          - generic [ref=e1113]:
+                            - button "Pooja Pathak" [ref=e1115] [cursor=pointer]
+                            - text: ;
+                          - button "Parul Choudhary" [ref=e1118] [cursor=pointer]
+                        - generic [ref=e1119]:
+                          - link "Explainable Machine Learning Models and Architectures" [ref=e1120] [cursor=pointer]:
+                            - /url: /book/10950239
+                          - generic [ref=e1121]:
+                            - text: "Year: 2023"
+                            - generic [ref=e1122]: "| Book Chapter"
+                            - generic [ref=e1123]:
+                              - text: "|"
+                              - 'button "Publisher: Wiley" [ref=e1126] [cursor=pointer]'
+                      - img "Full text access may be available." [ref=e1131]: 
+                    - list [ref=e1133]:
+                      - listitem [ref=e1134]:
+                        - button " Abstract" [ref=e1135] [cursor=pointer]:
+                          - generic [ref=e1136]: 
+                          - generic [ref=e1137]: Abstract
+                      - listitem [ref=e1138]:
+                        - link "PDF" [ref=e1142] [cursor=pointer]:
+                          - /url: /xpl/ebooks/bookPdfWithBanner.jsp?fileName=10951821.pdf&bkn=10950239&pdfType=chapter
+                          - generic [ref=e1143]: 
+                      - listitem [ref=e1144]:
+                        - link "IEEE is not the copyright holder of this material" [ref=e1147] [cursor=pointer]:
+                          - /url: javascript:void
+                          - generic "IEEE is not the copyright holder of this material" [ref=e1148]: 
+                  - text: 
+                - generic [ref=e1150]:
+                  - generic [ref=e1151]:
+                    - generic [ref=e1152]:
+                      - checkbox "Select search result" [ref=e1154]
+                      - generic [ref=e1155]:
+                        - 'heading "Optimizing Marketing Strategies: Predicting Customer Personality using Advanced Machine Learning Models" [level=3] [ref=e1156]':
+                          - 'link "Optimizing Marketing Strategies: Predicting Customer Personality using Advanced Machine Learning Models" [ref=e1157] [cursor=pointer]':
+                            - /url: /document/10912234/
+                        - paragraph [ref=e1159]:
+                          - generic [ref=e1160]:
+                            - link "Adla Aryan" [ref=e1161] [cursor=pointer]:
+                              - /url: /author/906810402748180
+                            - text: ;
+                          - generic [ref=e1162]:
+                            - link "Sada Preetham Sagar" [ref=e1163] [cursor=pointer]:
+                              - /url: /author/510362347362482
+                            - text: ;
+                          - generic [ref=e1164]:
+                            - link "Nadimpalli Madana Kailash Varma" [ref=e1165] [cursor=pointer]:
+                              - /url: /author/391049313877833
+                            - text: ;
+                          - generic [ref=e1166]:
+                            - link "Rangisetti Manikanta" [ref=e1167] [cursor=pointer]:
+                              - /url: /author/427882385866535
+                            - text: ;
+                          - generic [ref=e1168]:
+                            - link "Ramojula Rajashekar" [ref=e1169] [cursor=pointer]:
+                              - /url: /author/421951012975453
+                            - text: ;
+                          - link "Gagan Deep Arora" [ref=e1171] [cursor=pointer]:
+                            - /url: /author/37089766345
+                        - generic [ref=e1172]:
+                          - link "2024 2nd International Conference on Advances in Computation, Communication and Information Technology (ICAICCIT)" [ref=e1173] [cursor=pointer]:
+                            - /url: /xpl/conhome/10910943/proceeding
+                          - generic [ref=e1174]:
+                            - text: "Year: 2024"
+                            - generic [ref=e1175]: "| Conference Paper"
+                            - generic [ref=e1176]:
+                              - text: "|"
+                              - 'button "Publisher: IEEE" [ref=e1179] [cursor=pointer]'
+                          - generic [ref=e1180]:
+                            - text: "Cited by:"
+                            - link "Papers (3)" [ref=e1182] [cursor=pointer]:
+                              - /url: /document/10912234/citations?tabFilter=papers#citations
+                      - img "Included in Your Digital Subscription" [ref=e1187]: 
+                    - list [ref=e1189]:
+                      - listitem [ref=e1190]:
+                        - button " Abstract" [ref=e1191] [cursor=pointer]:
+                          - generic [ref=e1192]: 
+                          - generic [ref=e1193]: Abstract
+                      - listitem [ref=e1194]:
+                        - link "HTML" [ref=e1197] [cursor=pointer]:
+                          - /url: /document/10912234/
+                          - generic [ref=e1198]: HTML
+                      - listitem [ref=e1199]:
+                        - link "PDF" [ref=e1203] [cursor=pointer]:
+                          - /url: /stamp/stamp.jsp?tp=&arnumber=10912234
+                          - generic [ref=e1204]: 
+                      - listitem [ref=e1205]:
+                        - link "Copyright request permission for reuse" [ref=e1208] [cursor=pointer]:
+                          - /url: javascript:void()
+                          - generic [ref=e1209]: 
+                  - text: 
+                - generic [ref=e1211]:
+                  - generic [ref=e1212]:
+                    - generic [ref=e1213]:
+                      - checkbox "Select search result" [ref=e1215]
+                      - generic [ref=e1216]:
+                        - heading "Research on Edge Network Topology Optimization Based on Machine Learning" [level=3] [ref=e1217]:
+                          - link "Research on Edge Network Topology Optimization Based on Machine Learning" [ref=e1218] [cursor=pointer]:
+                            - /url: /document/10457399/
+                        - paragraph [ref=e1220]:
+                          - generic [ref=e1221]:
+                            - link "Boyi Wang" [ref=e1222] [cursor=pointer]:
+                              - /url: /author/37089291417
+                            - text: ;
+                          - link "Wei Zhang" [ref=e1224] [cursor=pointer]:
+                            - /url: /author/37090017494
+                        - generic [ref=e1225]:
+                          - link "2023 5th International Conference on Applied Machine Learning (ICAML)" [ref=e1226] [cursor=pointer]:
+                            - /url: /xpl/conhome/10457286/proceeding
+                          - generic [ref=e1227]:
+                            - text: "Year: 2023"
+                            - generic [ref=e1228]: "| Conference Paper"
+                            - generic [ref=e1229]:
+                              - text: "|"
+                              - 'button "Publisher: IEEE" [ref=e1232] [cursor=pointer]'
+                          - generic [ref=e1233]:
+                            - text: "Cited by:"
+                            - link "Papers (4)" [ref=e1235] [cursor=pointer]:
+                              - /url: /document/10457399/citations?tabFilter=papers#citations
+                      - img "Included in Your Digital Subscription" [ref=e1240]: 
+                    - list [ref=e1242]:
+                      - listitem [ref=e1243]:
+                        - button " Abstract" [ref=e1244] [cursor=pointer]:
+                          - generic [ref=e1245]: 
+                          - generic [ref=e1246]: Abstract
+                      - listitem [ref=e1247]:
+                        - link "HTML" [ref=e1250] [cursor=pointer]:
+                          - /url: /document/10457399/
+                          - generic [ref=e1251]: HTML
+                      - listitem [ref=e1252]:
+                        - link "PDF" [ref=e1256] [cursor=pointer]:
+                          - /url: /stamp/stamp.jsp?tp=&arnumber=10457399
+                          - generic [ref=e1257]: 
+                      - listitem [ref=e1258]:
+                        - link "Copyright request permission for reuse" [ref=e1261] [cursor=pointer]:
+                          - /url: javascript:void()
+                          - generic [ref=e1262]: 
+                  - text: 
+                - generic [ref=e1264]:
+                  - generic [ref=e1265]:
+                    - generic [ref=e1266]:
+                      - checkbox "Select search result" [ref=e1268]
+                      - generic [ref=e1269]:
+                        - heading "An overview of Machine Learning Technologies and their use in E-learning" [level=3] [ref=e1270]:
+                          - link "An overview of Machine Learning Technologies and their use in E-learning" [ref=e1271] [cursor=pointer]:
+                            - /url: /document/9151758/
+                        - paragraph [ref=e1273]:
+                          - generic [ref=e1274]:
+                            - link "Ramzi Farhat" [ref=e1275] [cursor=pointer]:
+                              - /url: /author/37546878500
+                            - text: ;
+                          - generic [ref=e1276]:
+                            - link "Yosra Mourali" [ref=e1277] [cursor=pointer]:
+                              - /url: /author/37088450350
+                            - text: ;
+                          - generic [ref=e1278]:
+                            - link "Mohamed Jemni" [ref=e1279] [cursor=pointer]:
+                              - /url: /author/37265473900
+                            - text: ;
+                          - link "Houcine Ezzedine" [ref=e1281] [cursor=pointer]:
+                            - /url: /author/37717618300
+                        - generic [ref=e1282]:
+                          - 'link "2020 International Multi-Conference on: “Organization of Knowledge and Advanced Technologies” (OCTA)" [ref=e1283] [cursor=pointer]':
+                            - /url: /xpl/conhome/9142125/proceeding
+                          - generic [ref=e1284]:
+                            - text: "Year: 2020"
+                            - generic [ref=e1285]: "| Conference Paper"
+                            - generic [ref=e1286]:
+                              - text: "|"
+                              - 'button "Publisher: IEEE" [ref=e1289] [cursor=pointer]'
+                          - generic [ref=e1290]:
+                            - text: "Cited by:"
+                            - link "Papers (35)" [ref=e1292] [cursor=pointer]:
+                              - /url: /document/9151758/citations?tabFilter=papers#citations
+                      - img "Included in Your Digital Subscription" [ref=e1297]: 
+                    - list [ref=e1299]:
+                      - listitem [ref=e1300]:
+                        - button " Abstract" [ref=e1301] [cursor=pointer]:
+                          - generic [ref=e1302]: 
+                          - generic [ref=e1303]: Abstract
+                      - listitem [ref=e1304]:
+                        - link "HTML" [ref=e1307] [cursor=pointer]:
+                          - /url: /document/9151758/
+                          - generic [ref=e1308]: HTML
+                      - listitem [ref=e1309]:
+                        - link "PDF" [ref=e1313] [cursor=pointer]:
+                          - /url: /stamp/stamp.jsp?tp=&arnumber=9151758
+                          - generic [ref=e1314]: 
+                      - listitem [ref=e1315]:
+                        - link "Copyright request permission for reuse" [ref=e1318] [cursor=pointer]:
+                          - /url: javascript:void()
+                          - generic [ref=e1319]: 
+                  - text: 
+                - generic [ref=e1321]:
+                  - generic [ref=e1322]:
+                    - generic [ref=e1323]:
+                      - checkbox "Select search result" [ref=e1325]
+                      - generic [ref=e1326]:
+                        - heading "A Survey on Skin Lesion Detection and Classification using Machine Learning" [level=3] [ref=e1327]:
+                          - link "A Survey on Skin Lesion Detection and Classification using Machine Learning" [ref=e1328] [cursor=pointer]:
+                            - /url: /document/10531571/
+                        - paragraph [ref=e1330]:
+                          - generic [ref=e1331]:
+                            - link "Rashmi Yadav" [ref=e1332] [cursor=pointer]:
+                              - /url: /author/37089783221
+                            - text: ;
+                          - link "Aruna Bhat" [ref=e1334] [cursor=pointer]:
+                            - /url: /author/37089403853
+                        - generic [ref=e1335]:
+                          - 'link "2024 2nd International Conference on Artificial Intelligence and Machine Learning Applications Theme: Healthcare and Internet of Things (AIMLA)" [ref=e1336] [cursor=pointer]':
+                            - /url: /xpl/conhome/10531297/proceeding
+                          - generic [ref=e1337]:
+                            - text: "Year: 2024"
+                            - generic [ref=e1338]: "| Conference Paper"
+                            - generic [ref=e1339]:
+                              - text: "|"
+                              - 'button "Publisher: IEEE" [ref=e1342] [cursor=pointer]'
+                          - generic [ref=e1343]:
+                            - text: "Cited by:"
+                            - link "Papers (7)" [ref=e1345] [cursor=pointer]:
+                              - /url: /document/10531571/citations?tabFilter=papers#citations
+                      - img "Included in Your Digital Subscription" [ref=e1350]: 
+                    - list [ref=e1352]:
+                      - listitem [ref=e1353]:
+                        - button " Abstract" [ref=e1354] [cursor=pointer]:
+                          - generic [ref=e1355]: 
+                          - generic [ref=e1356]: Abstract
+                      - listitem [ref=e1357]:
+                        - link "HTML" [ref=e1360] [cursor=pointer]:
+                          - /url: /document/10531571/
+                          - generic [ref=e1361]: HTML
+                      - listitem [ref=e1362]:
+                        - link "PDF" [ref=e1366] [cursor=pointer]:
+                          - /url: /stamp/stamp.jsp?tp=&arnumber=10531571
+                          - generic [ref=e1367]: 
+                      - listitem [ref=e1368]:
+                        - link "Copyright request permission for reuse" [ref=e1371] [cursor=pointer]:
+                          - /url: javascript:void()
+                          - generic [ref=e1372]: 
+                  - text: 
+                - generic [ref=e1374]:
+                  - generic [ref=e1375]:
+                    - generic [ref=e1376]:
+                      - checkbox "Select search result" [ref=e1378]
+                      - generic [ref=e1379]:
+                        - 'heading "Multimodal Representation Learning: Advances, Trends and Challenges" [level=3] [ref=e1380]':
+                          - 'link "Multimodal Representation Learning: Advances, Trends and Challenges" [ref=e1381] [cursor=pointer]':
+                            - /url: /document/8949228/
+                        - paragraph [ref=e1383]:
+                          - generic [ref=e1384]:
+                            - link "Su-Fang Zhang" [ref=e1385] [cursor=pointer]:
+                              - /url: /author/37557078900
+                            - text: ;
+                          - generic [ref=e1386]:
+                            - link "Jun-Hai Zhai" [ref=e1387] [cursor=pointer]:
+                              - /url: /author/37565886200
+                            - text: ;
+                          - generic [ref=e1388]:
+                            - link "Bo-Jun Xie" [ref=e1389] [cursor=pointer]:
+                              - /url: /author/37086660779
+                            - text: ;
+                          - generic [ref=e1390]:
+                            - link "Yan Zhan" [ref=e1391] [cursor=pointer]:
+                              - /url: /author/37089657453
+                            - text: ;
+                          - link "Xin Wang" [ref=e1393] [cursor=pointer]:
+                            - /url: /author/37087228411
+                        - generic [ref=e1394]:
+                          - link "2019 International Conference on Machine Learning and Cybernetics (ICMLC)" [ref=e1395] [cursor=pointer]:
+                            - /url: /xpl/conhome/8942645/proceeding
+                          - generic [ref=e1396]:
+                            - text: "Year: 2019"
+                            - generic [ref=e1397]: "| Conference Paper"
+                            - generic [ref=e1398]:
+                              - text: "|"
+                              - 'button "Publisher: IEEE" [ref=e1401] [cursor=pointer]'
+                          - generic [ref=e1402]:
+                            - text: "Cited by:"
+                            - link "Papers (34)" [ref=e1404] [cursor=pointer]:
+                              - /url: /document/8949228/citations?tabFilter=papers#citations
+                      - img "Included in Your Digital Subscription" [ref=e1409]: 
+                    - list [ref=e1411]:
+                      - listitem [ref=e1412]:
+                        - button " Abstract" [ref=e1413] [cursor=pointer]:
+                          - generic [ref=e1414]: 
+                          - generic [ref=e1415]: Abstract
+                      - listitem [ref=e1416]:
+                        - link "HTML" [ref=e1419] [cursor=pointer]:
+                          - /url: /document/8949228/
+                          - generic [ref=e1420]: HTML
+                      - listitem [ref=e1421]:
+                        - link "PDF" [ref=e1425] [cursor=pointer]:
+                          - /url: /stamp/stamp.jsp?tp=&arnumber=8949228
+                          - generic [ref=e1426]: 
+                      - listitem [ref=e1427]:
+                        - link "Copyright request permission for reuse" [ref=e1430] [cursor=pointer]:
+                          - /url: javascript:void()
+                          - generic [ref=e1431]: 
+                  - text: 
+                - generic [ref=e1433]:
+                  - generic [ref=e1434]:
+                    - generic [ref=e1435]:
+                      - checkbox "Select search result" [ref=e1437]
+                      - generic [ref=e1438]:
+                        - heading "EEG based Seizure Detection using Machine Learning & Deep Learning Algorithms" [level=3] [ref=e1439]:
+                          - link "EEG based Seizure Detection using Machine Learning & Deep Learning Algorithms" [ref=e1440] [cursor=pointer]:
+                            - /url: /document/11354436/
+                        - paragraph [ref=e1442]:
+                          - generic [ref=e1443]:
+                            - link "S. Leeladithya" [ref=e1444] [cursor=pointer]:
+                              - /url: /author/431769479376036
+                            - text: ;
+                          - generic [ref=e1445]:
+                            - link "Siri Ganesh" [ref=e1446] [cursor=pointer]:
+                              - /url: /author/798332126717795
+                            - text: ;
+                          - generic [ref=e1447]:
+                            - link "K Asha" [ref=e1448] [cursor=pointer]:
+                              - /url: /author/37087042331
+                            - text: ;
+                          - generic [ref=e1449]:
+                            - link "Akshaya Ramesh" [ref=e1450] [cursor=pointer]:
+                              - /url: /author/586410209595970
+                            - text: ;
+                          - generic [ref=e1451]:
+                            - link "Diya Ghorpade" [ref=e1452] [cursor=pointer]:
+                              - /url: /author/599708020680560
+                            - text: ;
+                          - link "Ananya Gupta" [ref=e1454] [cursor=pointer]:
+                            - /url: /author/37089741897
+                        - generic [ref=e1455]:
+                          - link "2025 5th International Conference on Mobile Networks and Wireless Communications (ICMNWC)" [ref=e1456] [cursor=pointer]:
+                            - /url: /xpl/conhome/11354161/proceeding
+                          - generic [ref=e1457]:
+                            - text: "Year: 2025"
+                            - generic [ref=e1458]: "| Conference Paper"
+                            - generic [ref=e1459]:
+                              - text: "|"
+                              - 'button "Publisher: IEEE" [ref=e1462] [cursor=pointer]'
+                      - img "Included in Your Digital Subscription" [ref=e1467]: 
+                    - list [ref=e1469]:
+                      - listitem [ref=e1470]:
+                        - button " Abstract" [ref=e1471] [cursor=pointer]:
+                          - generic [ref=e1472]: 
+                          - generic [ref=e1473]: Abstract
+                      - listitem [ref=e1474]:
+                        - link "HTML" [ref=e1477] [cursor=pointer]:
+                          - /url: /document/11354436/
+                          - generic [ref=e1478]: HTML
+                      - listitem [ref=e1479]:
+                        - link "PDF" [ref=e1483] [cursor=pointer]:
+                          - /url: /stamp/stamp.jsp?tp=&arnumber=11354436
+                          - generic [ref=e1484]: 
+                      - listitem [ref=e1485]:
+                        - link "Copyright request permission for reuse" [ref=e1488] [cursor=pointer]:
+                          - /url: javascript:void()
+                          - generic [ref=e1489]: 
+                  - text: 
+                - generic [ref=e1491]:
+                  - generic [ref=e1492]:
+                    - generic [ref=e1493]:
+                      - checkbox "Select search result" [ref=e1495]
+                      - generic [ref=e1496]:
+                        - heading "Machine learning protocol from ultrasound data for monitoring, predicting, and supporting the analysis of dam slopes" [level=3] [ref=e1497]:
+                          - link "Machine learning protocol from ultrasound data for monitoring, predicting, and supporting the analysis of dam slopes" [ref=e1498] [cursor=pointer]:
+                            - /url: /document/10069744/
+                        - paragraph [ref=e1500]:
+                          - generic [ref=e1501]:
+                            - link "Werickson F C Rocha" [ref=e1502] [cursor=pointer]:
+                              - /url: /author/37089771627
+                            - text: ;
+                          - generic [ref=e1503]:
+                            - link "Antônio U Lucena" [ref=e1504] [cursor=pointer]:
+                              - /url: /author/37089772250
+                            - text: ;
+                          - generic [ref=e1505]:
+                            - link "Gabriel F Sarmanho" [ref=e1506] [cursor=pointer]:
+                              - /url: /author/37089773186
+                            - text: ;
+                          - generic [ref=e1507]:
+                            - link "Rodrigo C Félix" [ref=e1508] [cursor=pointer]:
+                              - /url: /author/37089774179
+                            - text: ;
+                          - generic [ref=e1509]:
+                            - link "Sandro A Miqueleti" [ref=e1510] [cursor=pointer]:
+                              - /url: /author/37086674059
+                            - text: ;
+                          - link "Tiago C Dourado" [ref=e1512] [cursor=pointer]:
+                            - /url: /author/37089770683
+                        - generic [ref=e1513]:
+                          - link "2022 21st IEEE International Conference on Machine Learning and Applications (ICMLA)" [ref=e1514] [cursor=pointer]:
+                            - /url: /xpl/conhome/10068862/proceeding
+                          - generic [ref=e1515]:
+                            - text: "Year: 2022"
+                            - generic [ref=e1516]: "| Conference Paper"
+                            - generic [ref=e1517]:
+                              - text: "|"
+                              - 'button "Publisher: IEEE" [ref=e1520] [cursor=pointer]'
+                          - generic [ref=e1521]:
+                            - text: "Cited by:"
+                            - link "Papers (9)" [ref=e1523] [cursor=pointer]:
+                              - /url: /document/10069744/citations?tabFilter=papers#citations
+                      - img "Included in Your Digital Subscription" [ref=e1528]: 
+                    - list [ref=e1530]:
+                      - listitem [ref=e1531]:
+                        - button " Abstract" [ref=e1532] [cursor=pointer]:
+                          - generic [ref=e1533]: 
+                          - generic [ref=e1534]: Abstract
+                      - listitem [ref=e1535]:
+                        - link "HTML" [ref=e1538] [cursor=pointer]:
+                          - /url: /document/10069744/
+                          - generic [ref=e1539]: HTML
+                      - listitem [ref=e1540]:
+                        - link "PDF" [ref=e1544] [cursor=pointer]:
+                          - /url: /stamp/stamp.jsp?tp=&arnumber=10069744
+                          - generic [ref=e1545]: 
+                      - listitem [ref=e1546]:
+                        - link "Copyright request permission for reuse" [ref=e1549] [cursor=pointer]:
+                          - /url: javascript:void()
+                          - generic [ref=e1550]: 
+                  - text: 
+                - generic [ref=e1552]:
+                  - generic [ref=e1553]:
+                    - generic [ref=e1554]:
+                      - checkbox "Select search result" [ref=e1556]
+                      - generic [ref=e1557]:
+                        - heading "Semi-Supervised Machine Learning for Analyzing COVID-19 Related Twitter Data for Asian Hate Speech" [level=3] [ref=e1558]:
+                          - link "Semi-Supervised Machine Learning for Analyzing COVID-19 Related Twitter Data for Asian Hate Speech" [ref=e1559] [cursor=pointer]:
+                            - /url: /document/10069452/
+                        - paragraph [ref=e1561]:
+                          - generic [ref=e1562]:
+                            - link "Caitlin Richardson" [ref=e1563] [cursor=pointer]:
+                              - /url: /author/37089770733
+                            - text: ;
+                          - generic [ref=e1564]:
+                            - link "Sandeep Shah" [ref=e1565] [cursor=pointer]:
+                              - /url: /author/37089202868
+                            - text: ;
+                          - link "Xiaohong Yuan" [ref=e1567] [cursor=pointer]:
+                            - /url: /author/37403857000
+                        - generic [ref=e1568]:
+                          - link "2022 21st IEEE International Conference on Machine Learning and Applications (ICMLA)" [ref=e1569] [cursor=pointer]:
+                            - /url: /xpl/conhome/10068862/proceeding
+                          - generic [ref=e1570]:
+                            - text: "Year: 2022"
+                            - generic [ref=e1571]: "| Conference Paper"
+                            - generic [ref=e1572]:
+                              - text: "|"
+                              - 'button "Publisher: IEEE" [ref=e1575] [cursor=pointer]'
+                          - generic [ref=e1576]:
+                            - text: "Cited by:"
+                            - link "Papers (5)" [ref=e1578] [cursor=pointer]:
+                              - /url: /document/10069452/citations?tabFilter=papers#citations
+                      - img "Included in Your Digital Subscription" [ref=e1583]: 
+                    - list [ref=e1585]:
+                      - listitem [ref=e1586]:
+                        - button " Abstract" [ref=e1587] [cursor=pointer]:
+                          - generic [ref=e1588]: 
+                          - generic [ref=e1589]: Abstract
+                      - listitem [ref=e1590]:
+                        - link "HTML" [ref=e1593] [cursor=pointer]:
+                          - /url: /document/10069452/
+                          - generic [ref=e1594]: HTML
+                      - listitem [ref=e1595]:
+                        - link "PDF" [ref=e1599] [cursor=pointer]:
+                          - /url: /stamp/stamp.jsp?tp=&arnumber=10069452
+                          - generic [ref=e1600]: 
+                      - listitem [ref=e1601]:
+                        - link "Copyright request permission for reuse" [ref=e1604] [cursor=pointer]:
+                          - /url: javascript:void()
+                          - generic [ref=e1605]: 
+                  - text: 
+                - generic [ref=e1607]:
+                  - generic [ref=e1608]:
+                    - generic [ref=e1609]:
+                      - checkbox "Select search result" [ref=e1611]
+                      - generic [ref=e1612]:
+                        - heading "Machine Learning Models for Cardiovascular Disease Events Prediction" [level=3] [ref=e1613]:
+                          - link "Machine Learning Models for Cardiovascular Disease Events Prediction" [ref=e1614] [cursor=pointer]:
+                            - /url: /document/9871121/
+                        - paragraph [ref=e1616]:
+                          - generic [ref=e1617]:
+                            - link "Konstantina Tsarapatsani" [ref=e1618] [cursor=pointer]:
+                              - /url: /author/37089184513
+                            - text: ;
+                          - generic [ref=e1619]:
+                            - link "Antonis I. Sakellarios" [ref=e1620] [cursor=pointer]:
+                              - /url: /author/37857268200
+                            - text: ;
+                          - generic [ref=e1621]:
+                            - link "Vasileios C. Pezoulas" [ref=e1622] [cursor=pointer]:
+                              - /url: /author/37086233117
+                            - text: ;
+                          - generic [ref=e1623]:
+                            - link "Vassilis D. Tsakanikas" [ref=e1624] [cursor=pointer]:
+                              - /url: /author/37600869200
+                            - text: ;
+                          - generic [ref=e1625]:
+                            - link "Marcus E. Kleber" [ref=e1626] [cursor=pointer]:
+                              - /url: /author/37088934397
+                            - text: ;
+                          - generic [ref=e1627]:
+                            - link "Winfried März" [ref=e1628] [cursor=pointer]:
+                              - /url: /author/37088936030
+                            - text: ;
+                          - generic [ref=e1629]:
+                            - link "Lampros K. Michalis" [ref=e1630] [cursor=pointer]:
+                              - /url: /author/37284197800
+                            - text: ;
+                          - link "Dimitrios I. Fotiadis" [ref=e1632] [cursor=pointer]:
+                            - /url: /author/37266344600
+                        - generic [ref=e1633]:
+                          - link "2022 44th Annual International Conference of the IEEE Engineering in Medicine & Biology Society (EMBC)" [ref=e1634] [cursor=pointer]:
+                            - /url: /xpl/conhome/9870821/proceeding
+                          - generic [ref=e1635]:
+                            - text: "Year: 2022"
+                            - generic [ref=e1636]: "| Conference Paper"
+                            - generic [ref=e1637]:
+                              - text: "|"
+                              - 'button "Publisher: IEEE" [ref=e1640] [cursor=pointer]'
+                          - generic [ref=e1641]:
+                            - text: "Cited by:"
+                            - link "Papers (16)" [ref=e1643] [cursor=pointer]:
+                              - /url: /document/9871121/citations?tabFilter=papers#citations
+                      - img "Included in Your Digital Subscription" [ref=e1648]: 
+                    - list [ref=e1650]:
+                      - listitem [ref=e1651]:
+                        - button " Abstract" [ref=e1652] [cursor=pointer]:
+                          - generic [ref=e1653]: 
+                          - generic [ref=e1654]: Abstract
+                      - listitem [ref=e1655]:
+                        - link "HTML" [ref=e1658] [cursor=pointer]:
+                          - /url: /document/9871121/
+                          - generic [ref=e1659]: HTML
+                      - listitem [ref=e1660]:
+                        - link "PDF" [ref=e1664] [cursor=pointer]:
+                          - /url: /stamp/stamp.jsp?tp=&arnumber=9871121
+                          - generic [ref=e1665]: 
+                      - listitem [ref=e1666]:
+                        - link "Copyright request permission for reuse" [ref=e1669] [cursor=pointer]:
+                          - /url: javascript:void()
+                          - generic [ref=e1670]: 
+                  - text: 
+                - generic [ref=e1672]:
+                  - generic [ref=e1673]:
+                    - generic [ref=e1674]:
+                      - checkbox "Select search result" [ref=e1676]
+                      - generic [ref=e1677]:
+                        - heading "Research on Performance Prediction Model of Recycled Concrete Based on Machine Learning" [level=3] [ref=e1678]:
+                          - link "Research on Performance Prediction Model of Recycled Concrete Based on Machine Learning" [ref=e1679] [cursor=pointer]:
+                            - /url: /document/11344301/
+                        - paragraph [ref=e1681]:
+                          - link "Chunming Chen" [ref=e1683] [cursor=pointer]:
+                            - /url: /author/37965503400
+                        - generic [ref=e1684]:
+                          - link "2024 6th International Conference on Applied Machine Learning (ICAML)" [ref=e1685] [cursor=pointer]:
+                            - /url: /xpl/conhome/11344071/proceeding
+                          - generic [ref=e1686]:
+                            - text: "Year: 2024"
+                            - generic [ref=e1687]: "| Conference Paper"
+                            - generic [ref=e1688]:
+                              - text: "|"
+                              - 'button "Publisher: IEEE" [ref=e1691] [cursor=pointer]'
+                      - img "Included in Your Digital Subscription" [ref=e1696]: 
+                    - list [ref=e1698]:
+                      - listitem [ref=e1699]:
+                        - button " Abstract" [ref=e1700] [cursor=pointer]:
+                          - generic [ref=e1701]: 
+                          - generic [ref=e1702]: Abstract
+                      - listitem [ref=e1703]:
+                        - link "HTML" [ref=e1706] [cursor=pointer]:
+                          - /url: /document/11344301/
+                          - generic [ref=e1707]: HTML
+                      - listitem [ref=e1708]:
+                        - link "PDF" [ref=e1712] [cursor=pointer]:
+                          - /url: /stamp/stamp.jsp?tp=&arnumber=11344301
+                          - generic [ref=e1713]: 
+                      - listitem [ref=e1714]:
+                        - link "Copyright request permission for reuse" [ref=e1717] [cursor=pointer]:
+                          - /url: javascript:void()
+                          - generic [ref=e1718]: 
+                  - text: 
+                - generic [ref=e1720]:
+                  - generic [ref=e1721]:
+                    - generic [ref=e1722]:
+                      - checkbox "Select search result" [ref=e1724]
+                      - generic [ref=e1725]:
+                        - heading "A Class-Incremental Learning Method for Multi-Class Support Vector Machines in Text Classification" [level=3] [ref=e1726]:
+                          - link "A Class-Incremental Learning Method for Multi-Class Support Vector Machines in Text Classification" [ref=e1727] [cursor=pointer]:
+                            - /url: /document/4028499/
+                        - paragraph [ref=e1729]:
+                          - generic [ref=e1730]:
+                            - link "Bo-feng Zhang" [ref=e1731] [cursor=pointer]:
+                              - /url: /author/38184112700
+                            - text: ;
+                          - generic [ref=e1732]:
+                            - link "Jin-shu Su" [ref=e1733] [cursor=pointer]:
+                              - /url: /author/37311469100
+                            - text: ;
+                          - link "Xin Xu" [ref=e1735] [cursor=pointer]:
+                            - /url: /author/37334606400
+                        - generic [ref=e1736]:
+                          - link "2006 International Conference on Machine Learning and Cybernetics" [ref=e1737] [cursor=pointer]:
+                            - /url: /xpl/conhome/4028021/proceeding
+                          - generic [ref=e1738]:
+                            - text: "Year: 2006"
+                            - generic [ref=e1739]: "| Conference Paper"
+                            - generic [ref=e1740]:
+                              - text: "|"
+                              - 'button "Publisher: IEEE" [ref=e1743] [cursor=pointer]'
+                          - generic [ref=e1744]:
+                            - text: "Cited by:"
+                            - link "Papers (32)" [ref=e1746] [cursor=pointer]:
+                              - /url: /document/4028499/citations?tabFilter=papers#citations
+                      - img "Included in Your Digital Subscription" [ref=e1751]: 
+                    - list [ref=e1753]:
+                      - listitem [ref=e1754]:
+                        - button " Abstract" [ref=e1755] [cursor=pointer]:
+                          - generic [ref=e1756]: 
+                          - generic [ref=e1757]: Abstract
+                      - listitem [ref=e1758]:
+                        - link "HTML" [ref=e1761] [cursor=pointer]:
+                          - /url: /document/4028499/
+                          - generic [ref=e1762]: HTML
+                      - listitem [ref=e1763]:
+                        - link "PDF" [ref=e1767] [cursor=pointer]:
+                          - /url: /stamp/stamp.jsp?tp=&arnumber=4028499
+                          - generic [ref=e1768]: 
+                      - listitem [ref=e1769]:
+                        - link "Copyright request permission for reuse" [ref=e1772] [cursor=pointer]:
+                          - /url: javascript:void()
+                          - generic [ref=e1773]: 
+                  - text: 
+                - generic [ref=e1775]:
+                  - generic [ref=e1776]:
+                    - generic [ref=e1777]:
+                      - checkbox "Select search result" [ref=e1779]
+                      - generic [ref=e1780]:
+                        - 'heading "Robust Representation Learning for Privacy-Preserving Machine Learning: A Multi-Objective Autoencoder Approach" [level=3] [ref=e1781]':
+                          - 'link "Robust Representation Learning for Privacy-Preserving Machine Learning: A Multi-Objective Autoencoder Approach" [ref=e1782] [cursor=pointer]':
+                            - /url: /document/11142865/
+                        - paragraph [ref=e1784]:
+                          - generic [ref=e1785]:
+                            - link "Sofiane Ouaari" [ref=e1786] [cursor=pointer]:
+                              - /url: /author/37089565327
+                            - text: ;
+                          - generic [ref=e1787]:
+                            - link "Ali Burak Ünal" [ref=e1788] [cursor=pointer]:
+                              - /url: /author/986440384756810
+                            - text: ;
+                          - generic [ref=e1789]:
+                            - link "Mete Akgün" [ref=e1790] [cursor=pointer]:
+                              - /url: /author/38071215900
+                            - text: ;
+                          - link "Nico Pfeifer" [ref=e1792] [cursor=pointer]:
+                            - /url: /author/702963306034317
+                        - generic [ref=e1793]:
+                          - link "IEEE Access" [ref=e1794] [cursor=pointer]:
+                            - /url: /xpl/RecentIssue.jsp?punumber=6287639
+                          - generic [ref=e1795]:
+                            - text: "Year: 2025"
+                            - generic [ref=e1796]:
+                              - text: "|"
+                              - 'link "Volume: 13" [ref=e1798] [cursor=pointer]':
+                                - /url: /xpl/tocresult.jsp?isnumber=10820123
+                            - generic [ref=e1799]: "| Journal Article"
+                            - generic [ref=e1800]:
+                              - text: "|"
+                              - 'button "Publisher: IEEE" [ref=e1803] [cursor=pointer]'
+                          - generic [ref=e1804]:
+                            - text: "Cited by:"
+                            - link "Papers (1)" [ref=e1806] [cursor=pointer]:
+                              - /url: /document/11142865/citations?tabFilter=papers#citations
+                      - generic [ref=e1808]:
+                        - img "Open Access" [ref=e1811]: 
+                        - button "We aim to leverage robust representation learning as a way of encoding our data while optimising the privacy-utility trade-off. Our method centers on training autoencoders in a multi-objective manner and then concatenating the latent and learned features from the encoding part as the encoded form of our data to be sent to a third party for intensive training." [ref=e1815] [cursor=pointer]:
+                          - img "We aim to leverage robust representation learning as a way of encoding our data while optimising the privacy-utility trade-off. Our method centers on training autoencoders in a multi-objective manner and then concatenating the latent and learned features from the encoding part as the encoded form of our data to be sent to a third party for intensive training." [ref=e1816]
+                    - list [ref=e1818]:
+                      - listitem [ref=e1819]:
+                        - button " Abstract" [ref=e1820] [cursor=pointer]:
+                          - generic [ref=e1821]: 
+                          - generic [ref=e1822]: Abstract
+                      - listitem [ref=e1823]:
+                        - link "HTML" [ref=e1826] [cursor=pointer]:
+                          - /url: /document/11142865/
+                          - generic [ref=e1827]: HTML
+                      - listitem [ref=e1828]:
+                        - link "PDF" [ref=e1832] [cursor=pointer]:
+                          - /url: /stamp/stamp.jsp?tp=&arnumber=11142865
+                          - generic [ref=e1833]: 
+                      - listitem [ref=e1834]:
+                        - link "IEEE is not the copyright holder of this material" [ref=e1837] [cursor=pointer]:
+                          - /url: javascript:void
+                          - generic "IEEE is not the copyright holder of this material" [ref=e1838]: 
+                  - text: 
+              - list [ref=e1841]:
+                - listitem [ref=e1842]:
+                  - button "Page 1 of search results" [ref=e1843] [cursor=pointer]: "1"
+                - listitem [ref=e1844]:
+                  - button "Page 2 of search results" [ref=e1845] [cursor=pointer]: "2"
+                - listitem [ref=e1846]:
+                  - button "Page 3 of search results" [ref=e1847] [cursor=pointer]: "3"
+                - listitem [ref=e1848]:
+                  - button "Page 4 of search results" [ref=e1849] [cursor=pointer]: "4"
+                - listitem [ref=e1850]:
+                  - button "Page 5 of search results" [ref=e1851] [cursor=pointer]: "5"
+                - listitem [ref=e1852]:
+                  - button "Page 6 of search results" [ref=e1853] [cursor=pointer]: "6"
+                - listitem [ref=e1854]:
+                  - button "Page 7 of search results" [ref=e1855] [cursor=pointer]: "7"
+                - listitem [ref=e1856]:
+                  - button "Page 8 of search results" [ref=e1857] [cursor=pointer]: "8"
+                - listitem [ref=e1858]:
+                  - button "Page 9 of search results" [ref=e1859] [cursor=pointer]: "9"
+                - listitem [ref=e1860]:
+                  - button "Page 10 of search results" [ref=e1861] [cursor=pointer]: "10"
+                - listitem [ref=e1862]:
+                  - button "Next page of search results" [ref=e1863] [cursor=pointer]: ">"
+                - listitem [ref=e1864]:
+                  - button "Next 10 pages of search results" [ref=e1865] [cursor=pointer]: Next
+            - generic [ref=e1875]:
+              - heading "Standards Dictionary Terms Top 25 dictionary terms sorted by relevancy based on your keywords" [level=1] [ref=e1876]:
+                - text: Standards Dictionary Terms
+                - link "Top 25 dictionary terms sorted by relevancy based on your keywords" [ref=e1877] [cursor=pointer]:
+                  - /url: /Xplorehelp/browsing-ieee-xplore/browsing-by-content-type#standards
+              - list [ref=e1878]:
+                - listitem [ref=e1879]:
+                  - link "API" [ref=e1880] [cursor=pointer]:
+                    - /url: /browse/standards/dictionary?queryText=API
+                - listitem [ref=e1881]:
+                  - link "Boundary Port" [ref=e1882] [cursor=pointer]:
+                    - /url: /browse/standards/dictionary?queryText=Boundary Port
+                - listitem [ref=e1883]:
+                  - link "AI" [ref=e1884] [cursor=pointer]:
+                    - /url: /browse/standards/dictionary?queryText=AI
+                - listitem [ref=e1885]:
+                  - link "Common and Internal Spanning Tree (CIST)" [ref=e1886] [cursor=pointer]:
+                    - /url: /browse/standards/dictionary?queryText=Common and Internal Spanning Tree (CIST)
+                - listitem [ref=e1887]:
+                  - link "Frame" [ref=e1888] [cursor=pointer]:
+                    - /url: /browse/standards/dictionary?queryText=Frame
+                - listitem [ref=e1889]:
+                  - link "Frame relay" [ref=e1890] [cursor=pointer]:
+                    - /url: /browse/standards/dictionary?queryText=Frame relay
+                - listitem [ref=e1891]:
+                  - link "Legacy region" [ref=e1892] [cursor=pointer]:
+                    - /url: /browse/standards/dictionary?queryText=Legacy region
+                - listitem [ref=e1893]:
+                  - link "Multiple Spanning Tree Instance (MSTI)" [ref=e1894] [cursor=pointer]:
+                    - /url: /browse/standards/dictionary?queryText=Multiple Spanning Tree Instance (MSTI)
+                - listitem [ref=e1895]:
+                  - link "Priority-tagged frame" [ref=e1896] [cursor=pointer]:
+                    - /url: /browse/standards/dictionary?queryText=Priority-tagged frame
+                - listitem [ref=e1897]:
+                  - link "Single Spanning Tree (SST) Bridge" [ref=e1898] [cursor=pointer]:
+                    - /url: /browse/standards/dictionary?queryText=Single Spanning Tree (SST) Bridge
+                - listitem [ref=e1899]:
+                  - link "Spanning Tree Algorithm and Protocol (STP)" [ref=e1900] [cursor=pointer]:
+                    - /url: /browse/standards/dictionary?queryText=Spanning Tree Algorithm and Protocol (STP)
+                - listitem [ref=e1901]:
+                  - link "Spanning Tree Bridge Protocol Data Unit (ST BPDU)" [ref=e1902] [cursor=pointer]:
+                    - /url: /browse/standards/dictionary?queryText=Spanning Tree Bridge Protocol Data Unit (ST BPDU)
+                - listitem [ref=e1903]:
+                  - link "Tag header" [ref=e1904] [cursor=pointer]:
+                    - /url: /browse/standards/dictionary?queryText=Tag header
+                - listitem [ref=e1905]:
+                  - link "Tagged frame" [ref=e1906] [cursor=pointer]:
+                    - /url: /browse/standards/dictionary?queryText=Tagged frame
+                - listitem [ref=e1907]:
+                  - link "Untagged frame" [ref=e1908] [cursor=pointer]:
+                    - /url: /browse/standards/dictionary?queryText=Untagged frame
+                - listitem [ref=e1909]:
+                  - link "customer" [ref=e1910] [cursor=pointer]:
+                    - /url: /browse/standards/dictionary?queryText=customer
+                - listitem [ref=e1911]:
+                  - link "protocol group database" [ref=e1912] [cursor=pointer]:
+                    - /url: /browse/standards/dictionary?queryText=protocol group database
+                - listitem [ref=e1913]:
+                  - link "protocol group identifier" [ref=e1914] [cursor=pointer]:
+                    - /url: /browse/standards/dictionary?queryText=protocol group identifier
+                - listitem [ref=e1915]:
+                  - link "protocol template" [ref=e1916] [cursor=pointer]:
+                    - /url: /browse/standards/dictionary?queryText=protocol template
+                - listitem [ref=e1917]:
+                  - link "Bridge" [ref=e1918] [cursor=pointer]:
+                    - /url: /browse/standards/dictionary?queryText=Bridge
+                - listitem [ref=e1919]:
+                  - link "Common Spanning Tree (CST)" [ref=e1920] [cursor=pointer]:
+                    - /url: /browse/standards/dictionary?queryText=Common Spanning Tree (CST)
+                - listitem [ref=e1921]:
+                  - link "Ethernet Switched Path (ESP)" [ref=e1922] [cursor=pointer]:
+                    - /url: /browse/standards/dictionary?queryText=Ethernet Switched Path (ESP)
+                - listitem [ref=e1923]:
+                  - link "Expedited traffic" [ref=e1924] [cursor=pointer]:
+                    - /url: /browse/standards/dictionary?queryText=Expedited traffic
+                - listitem [ref=e1925]:
+                  - link "Group" [ref=e1926] [cursor=pointer]:
+                    - /url: /browse/standards/dictionary?queryText=Group
+                - listitem [ref=e1927]:
+                  - link "Internal Spanning Tree (IST)" [ref=e1928] [cursor=pointer]:
+                    - /url: /browse/standards/dictionary?queryText=Internal Spanning Tree (IST)
+              - link "Browse »" [ref=e1930] [cursor=pointer]:
+                - /url: /browse/standards/dictionary
+      - contentinfo [ref=e129]:
+        - generic [ref=e132]:
+          - generic [ref=e133]:
+            - generic [ref=e134]:
+              - heading "IEEE Personal Account" [level=2] [ref=e135]
+              - list [ref=e136]:
+                - listitem [ref=e137]:
+                  - link "Change username/password" [ref=e138] [cursor=pointer]:
+                    - /url: https://www.ieee.org/profile/changeusrpwd/showChangeUsrPwdPage.html?refSite=https://ieeexplore.ieee.org&refSiteName=IEEE Xplore
+            - generic [ref=e139]:
+              - heading "Purchase Details" [level=2] [ref=e140]
+              - list [ref=e141]:
+                - listitem [ref=e142]:
+                  - link "Payment Options" [ref=e143] [cursor=pointer]:
+                    - /url: https://www.ieee.org/profile/payment/showPaymentHome.html?refSite=https://ieeexplore.ieee.org&refSiteName=IEEE Xplore
+                - listitem [ref=e144]:
+                  - link "View Purchased Documents" [ref=e145] [cursor=pointer]:
+                    - /url: /articleSale/purchaseHistory.jsp
+            - generic [ref=e146]:
+              - heading "Profile Information" [level=2] [ref=e147]
+              - list [ref=e148]:
+                - listitem [ref=e149]:
+                  - link "Communications Preferences" [ref=e150] [cursor=pointer]:
+                    - /url: https://www.ieee.org/ieee-privacyportal/app/ibp?refSite=https://ieeexplore.ieee.org&refSiteName=IEEE Xplore
+                - listitem [ref=e151]:
+                  - link "Profession and Education" [ref=e152] [cursor=pointer]:
+                    - /url: https://www.ieee.org/profile/profedu/getProfEduInformation.html?refSite=https://ieeexplore.ieee.org&refSiteName=IEEE Xplore
+                - listitem [ref=e153]:
+                  - link "Technical interests" [ref=e154] [cursor=pointer]:
+                    - /url: https://www.ieee.org/profile/tips/getTipsInfo.html?refSite=https://ieeexplore.ieee.org&refSiteName=IEEE Xplore
+            - generic [ref=e155]:
+              - heading "Need Help?" [level=2] [ref=e156]
+              - list [ref=e157]:
+                - listitem [ref=e158]:
+                  - 'link "US & Canada: +1 800 678 4333" [ref=e159] [cursor=pointer]':
+                    - /url: tel:+1-800-678-4333
+                - listitem [ref=e160]:
+                  - 'link "Worldwide: +1 732 981 0060" [ref=e161] [cursor=pointer]':
+                    - /url: tel:+1-732-981-0060
+                - listitem [ref=e162]:
+                  - link "Contact & Support" [ref=e163] [cursor=pointer]:
+                    - /url: /xpl/contact
+            - generic [ref=e164]:
+              - heading "Follow" [level=2] [ref=e165]
+              - list [ref=e166]:
+                - listitem [ref=e167]:
+                  - link "Follow us on Facebook" [ref=e168] [cursor=pointer]:
+                    - /url: https://www.facebook.com/IEEEXploreDigitalLibrary/
+                    - generic [ref=e169]: 
+                - listitem [ref=e170]:
+                  - link "Follow us on Instagram" [ref=e171] [cursor=pointer]:
+                    - /url: https://www.instagram.com/ieeexplore_org
+                    - generic [ref=e172]: 
+                - listitem [ref=e173]:
+                  - link "Follow us on LinkedIn" [ref=e174] [cursor=pointer]:
+                    - /url: https://www.linkedin.com/showcase/ieee-xplore
+                    - generic [ref=e175]: 
+                - listitem [ref=e176]:
+                  - link "Follow us on Youtube" [ref=e177] [cursor=pointer]:
+                    - /url: https://www.youtube.com/ieeexplore
+                    - generic [ref=e178]: 
+                - listitem [ref=e179]:
+                  - link "Follow us on Twitter" [ref=e180] [cursor=pointer]:
+                    - /url: https://twitter.com/IEEEXplore?ref_src=twsrc%5Egoogle%7Ctwcamp%5Eserp%7Ctwgr%5Eauthor
+          - generic [ref=e182]:
+            - paragraph [ref=e183]:
+              - link "About IEEE Xplore" [ref=e185] [cursor=pointer]:
+                - /url: /Xplorehelp/overview-of-ieee-xplore/about-ieee-xplore
+                - text: About IEEE
+                - emphasis [ref=e186]: Xplore
+              - text: "|"
+              - link "Contact Us" [ref=e188] [cursor=pointer]:
+                - /url: /xpl/contact
+              - text: "|"
+              - link "Help" [ref=e190] [cursor=pointer]:
+                - /url: /Xplorehelp
+              - text: "|"
+              - link "Accessibility" [ref=e192] [cursor=pointer]:
+                - /url: /Xplorehelp/overview-of-ieee-xplore/accessibility-statement
+              - text: "|"
+              - link "Terms of Use" [ref=e194] [cursor=pointer]:
+                - /url: /Xplorehelp/overview-of-ieee-xplore/terms-of-use
+              - text: "|"
+              - link "Nondiscrimination Policy" [ref=e196] [cursor=pointer]:
+                - /url: http://www.ieee.org/web/aboutus/whatis/policies/p9-26.html
+              - text: "|"
+              - link "IEEE Ethics Reporting " [ref=e198] [cursor=pointer]:
+                - /url: " http://www.ieee-ethics-reporting.org/"
+                - text: IEEE Ethics Reporting
+                - generic [ref=e199]: 
+              - text: "|"
+              - link "Sitemap" [ref=e201] [cursor=pointer]:
+                - /url: /Xplorehelp/overview-of-ieee-xplore/ieee-xplore-sitemap
+              - text: "|"
+              - link "IEEE Privacy Policy" [ref=e203] [cursor=pointer]:
+                - /url: http://www.ieee.org/about/help/security_privacy.html
+            - paragraph [ref=e204]: A public charity, IEEE is the world's largest technical professional organization dedicated to advancing technology for the benefit of humanity.
+            - paragraph [ref=e205]: © Copyright 2026 IEEE - All rights reserved, including rights for text and data mining and training of artificial intelligence and similar technologies.
+    - text: » » » » » » » » » » » | | | | | | |
+  - button "Feedback" [ref=e206] [cursor=pointer]:
+    - iframe [ref=e207]:
+      - img [ref=f15e2] [cursor=pointer]
