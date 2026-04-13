@@ -33,7 +33,7 @@ class CNKIScraper:
         if self.playwright:
             await self.playwright.stop()
 
-    async def search_papers(self, query: str, search_field: str = "主题", db_scope: str = "总库", source_type: str = "all", start_index: int = 0, limit: int = 10) -> Dict:
+    async def search_papers(self, query: str, search_field: str = "主题", db_scope: str = "总库", source_type: str = "all", start_year: int = None, end_year: int = None, sort_by: str = "relevance", start_index: int = 0, limit: int = 10) -> Dict:
         """
         search_papers with pagination, precise filtering, and search field support.
         """

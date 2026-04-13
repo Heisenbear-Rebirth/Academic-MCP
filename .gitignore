@@ -14,11 +14,18 @@ test_outputs/
 arxiv_test_md_output/
 ieee_test_md_output/
 downloads/
+downloads_test/
+scratch/
+scratch_test_downloads/
+scratch_*.py
 
 # Playwright & DataDome Authenticated Persistent Context profiles
 # DO NOT track these to avoid breaking local cross-environment security states
 .sd_profile/
 .acm_profile/
+.gs_profile/
+.ieee_profile/
+.test_profile*/
 .playwright-mcp/
 
 # Debug and Logging
@@ -26,6 +33,8 @@ downloads/
 *.err
 *.out
 test_*_logs.txt
+test_prefs.pdf
+sd_debug_*.png
 
 # Local settings / IDE
 .vscode/

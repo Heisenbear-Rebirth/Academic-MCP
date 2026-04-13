@@ -8,6 +8,7 @@ from ieee_scraper import scraper_instance as ieee
 from arxiv_scraper import scraper_instance as arxiv
 from acm_scraper import scraper_instance as acm
 from sd_scraper import scraper_instance as sd
+from gs_scraper import scraper_instance as gs
 
 async def test_platform(name, scraper, query, db_scope="", source_type="all"):
     print(f"\n{'='*50}")
@@ -80,6 +81,7 @@ async def test_platform(name, scraper, query, db_scope="", source_type="all"):
 
 async def main():
     platforms = [
+        ("GS", gs, "reinforcement learning precision agriculture drone", "", "all"),
         ("ARXIV", arxiv, "quantum computing", "", "all"),
         ("SD", sd, "machine learning in healthcare", "", "all"),
         ("IEEE", ieee, "deep learning", "", "all"),
@@ -98,7 +100,7 @@ async def main():
     print("FINAL TEST REPORT")
     print("#"*40)
     for name, success in results.items():
-        status = "PASSED ✓" if success else "FAILED ✗"
+        status = "PASSED [OK]" if success else "FAILED [FAIL]"
         print(f"{name.ljust(10)} : {status}")
 
 

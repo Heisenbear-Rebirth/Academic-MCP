@@ -18,6 +18,15 @@ class ScienceDirectScraper:
         if not self.context:
             print("Initializing ScienceDirect Persistent Browser Context...")
             profile_dir = os.path.abspath(".sd_profile")
+            
+            import json
+            # Force Chrome to avoid inline rendering, allowing native Datadome-bypassed Download events
+            os.makedirs(os.path.join(profile_dir, "Default"), exist_ok=True)
+            prefs_path = os.path.join(profile_dir, "Default", "Preferences")
+            prefs = {"plugins": {"always_open_pdf_externally": True}, "download": {"prompt_for_download": False}}
+            with open(prefs_path, "w") as f:
+                json.dump(prefs, f)
+
             self.playwright = await async_playwright().start()
             
             # Using persistent context. We MUST use headless=False to bypass DataDome since it detects pure headless.
@@ -25,8 +34,9 @@ class ScienceDirectScraper:
             self.context = await self.playwright.chromium.launch_persistent_context(
                 user_data_dir=profile_dir,
                 headless=False,
-                args=["--disable-blink-features=AutomationControlled", "--window-position=0,0", "--start-minimized"],
-                viewport={"width": 1280, "height": 720}
+                args=["--disable-blink-features=AutomationControlled", "--window-position=0,0"],
+                viewport={"width": 1280, "height": 720},
+                accept_downloads=True
             )
             self.page = self.context.pages[0] if self.context.pages else await self.context.new_page()
             
@@ -66,7 +76,7 @@ class ScienceDirectScraper:
             await self.playwright.stop()
             self.playwright = None
 
-    async def search_papers(self, query: str, search_field: str = "qs", db_scope: str = "", source_type: str = "all", start_index: int = 0, limit: int = 10) -> Dict:
+    async def search_papers(self, query: str, search_field: str = "qs", db_scope: str = "", source_type: str = "all", start_year: int = None, end_year: int = None, sort_by: str = "relevance", start_index: int = 0, limit: int = 10) -> Dict:
         await self._ensure_browser()
         
         # SD handles pages by 'offset' (number of items to skip).
@@ -84,6 +94,17 @@ class ScienceDirectScraper:
         field = field_map.get(search_field, search_field if search_field in ["qs", "title", "authors"] else "qs")
         
         q_url = f"https://www.sciencedirect.com/search?{field}={urllib.parse.quote_plus(query)}&offset={offset}"
+        
+        if sort_by == "date_desc":
+            q_url += "&sortBy=date"
+            
+        if start_year and end_year:
+            # For SD we can pass a range or list of years. Range might not explicitly be date=2023-2026. Usually it's years=2023,2024. Let's try date.
+            q_url += f"&date={start_year}-{end_year}"
+        elif start_year:
+            q_url += f"&date={start_year}-2026"
+        elif end_year:
+            q_url += f"&date=1900-{end_year}"
         
         # Mappings for source_type 
         # e.g., articleTypes=REV (Review articles), FLA (Research articles), etc.
@@ -207,38 +228,59 @@ class ScienceDirectScraper:
         await self._ensure_browser()
         os.makedirs(output_dir, exist_ok=True)
         
-        # To get the PDF from SD:
-        # PII is inside the URL: e.g., /science/article/pii/S1234567890
+        # To get the valid PDF URL with the encrypted md5 signature, we MUST first go to the page and find the View PDF button.
+        await self.page.goto(detail_url, wait_until="domcontentloaded")
+        
+        import re
         pii_match = re.search(r'/pii/([A-Z0-9]+)', detail_url)
-        if not pii_match:
-            return "Failed to extract PII from the URL."
-        pii = pii_match.group(1)
+        safe_name = pii_match.group(1) if pii_match else "unknown_pii"
         
-        # PDF URL in SD is usually /science/article/pii/{pii}/pdfft
-        pdf_url = f"https://www.sciencedirect.com/science/article/pii/{pii}/pdfft?isDTMRedir=true&download=true"
-        
-        safe_name = pii
-        file_path = os.path.join(output_dir, f"sd_{safe_name}.pdf")
-        
-        print(f"Fetching PDF via secure Playwright context: {pdf_url}")
+        page_title = await self.page.title()
+        print(f"Page Title: {page_title}")
         
         try:
-            # Inject Javascript to fetch the blob and return it as base64 string
-            base64_data = await self.page.evaluate("""async (url) => {
-                const response = await fetch(url);
-                if (!response.ok) throw new Error('Fetch failed: ' + response.status);
-                const blob = await response.blob();
-                return new Promise((resolve, reject) => {
-                    const reader = new FileReader();
-                    reader.onloadend = () => resolve(reader.result.split(',')[1]);
-                    reader.onerror = reject;
-                    reader.readAsDataURL(blob);
-                });
-            }""", pdf_url)
+            # Wait for client-side React/Vue components to render the download button
+            try:
+                await self.page.wait_for_selector(f'a[href*="/science/article/pii/{safe_name}/pdfft"]', timeout=15000)
+            except Exception as e:
+                print(f"Selector wait timeout, button might be delayed or unavailable: {e}")
+                
+            # Dynamically extract the PDF link matching the current PII, bypassing text quirks like &nbsp;
+            js_code_extract = """
+            (targetPii) => {
+                let btn = Array.from(document.querySelectorAll('a')).find(el => 
+                    el.href && el.href.includes('/science/article/pii/' + targetPii + '/pdfft')
+                );
+                return btn ? btn.href : null;
+            }
+            """
+            pdf_url = await self.page.evaluate(js_code_extract, safe_name)
             
-            import base64
-            with open(file_path, "wb") as f:
-                f.write(base64.b64decode(base64_data))
+            if not pdf_url:
+                print(f"Could not find the true PDF link with md5 token on the page for {safe_name}.")
+                return "Error: Could not locate the native View PDF button."
+                
+            print(f"Discovered signed PDF URL: {pdf_url}")
+            
+            # We strictly bypass Datadome proxy walls by emulating a true navigation event!
+            js_code = f"window.location.href = '{pdf_url}';"
+            
+            import re
+            pii_match = re.search(r'/pii/([A-Z0-9]+)', detail_url)
+            safe_name = pii_match.group(1) if pii_match else "unknown_pii"
+            
+            file_path = os.path.join(output_dir, f"sd_{safe_name}.pdf")
+            
+            async with self.page.expect_download(timeout=60000) as download_info:
+                await self.page.evaluate(js_code)
+                
+            download = await download_info.value
+            await download.save_as(file_path)
+            
+            # Additional check: Did we download a 51KB HTML blob indicating blockage?
+            if os.path.getsize(file_path) < 100000:
+                # Still failing, Elsevier is aggressively blocking our background traffic!
+                return f"Error: The downloaded payload ({os.path.getsize(file_path)} bytes) appears to be an HTML captcha trap instead of the PDF."
                 
             return file_path
         except Exception as e:

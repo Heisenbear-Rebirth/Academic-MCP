@@ -15,35 +15,61 @@ class IEEEScraper:
         self.page = None
     
     async def initialize(self):
+        import json
         self.playwright = await async_playwright().start()
-        # Launch headless Chromium
-        self.browser = await self.playwright.chromium.launch(
-            headless=True,
-            args=["--disable-blink-features=AutomationControlled"]
-        )
-        self.context = await self.browser.new_context(
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        
+        profile_dir = os.path.abspath(".ieee_profile")
+        os.makedirs(os.path.join(profile_dir, "Default"), exist_ok=True)
+        # Bypasses WAF completely; renders PDFs not internally, but drops straight to downloader
+        prefs = {"plugins": {"always_open_pdf_externally": True}, "download": {"prompt_for_download": False}}
+        with open(os.path.join(profile_dir, "Default", "Preferences"), "w") as f:
+            json.dump(prefs, f)
+            
+        # Migrate IEEE to persistent context to leverage Anti-Bot cookies globally
+        self.context = await self.playwright.chromium.launch_persistent_context(
+            user_data_dir=profile_dir,
+            headless=False,
+            args=["--disable-blink-features=AutomationControlled", "--window-position=0,0", "--start-minimized"],
+            viewport={"width": 1280, "height": 720},
             accept_downloads=True
         )
-        self.page = await self.context.new_page()
+        self.page = self.context.pages[0] if self.context.pages else await self.context.new_page()
 
     async def close(self):
         if self.page:
-            await self.page.close()
+            try:
+                await self.page.close()
+            except:
+                pass
         if self.context:
             await self.context.close()
-        if self.browser:
-            await self.browser.close()
+            self.context = None
         if self.playwright:
             await self.playwright.stop()
+            self.playwright = None
 
-    async def search_papers(self, query: str, search_field: str = "All", db_scope: str = "", source_type: str = "all", start_index: int = 0, limit: int = 10) -> Dict:
+    async def search_papers(self, query: str, search_field: str = "All", db_scope: str = "", source_type: str = "all", start_year: int = None, end_year: int = None, sort_by: str = "relevance", start_index: int = 0, limit: int = 10) -> Dict:
         if not self.page:
             await self.initialize()
             
         import urllib.parse
         encoded_query = urllib.parse.quote(query)
-        base_url = f"https://ieeexplore.ieee.org/search/searchresult.jsp?newsearch=true&queryText={encoded_query}"
+        
+        sort_str = ""
+        if sort_by == "citations":
+            sort_str = "&sortType=paper-citations"
+        elif sort_by == "date_desc":
+            sort_str = "&sortType=newest"
+            
+        range_str = ""
+        if start_year and end_year:
+            range_str = f"&ranges={start_year}_{end_year}_Year"
+        elif start_year:
+            range_str = f"&ranges={start_year}_2026_Year"
+        elif end_year:
+            range_str = f"&ranges=1900_{end_year}_Year"
+            
+        base_url = f"https://ieeexplore.ieee.org/search/searchresult.jsp?newsearch=true&queryText={encoded_query}{sort_str}{range_str}"
         
         await self.page.goto(base_url, wait_until="networkidle")
         await asyncio.sleep(4)
@@ -108,6 +134,7 @@ class IEEEScraper:
 
         results = []
         collected = 0
+        seen_links = set()
         
         while collected < limit:
             html = await self.page.content()
@@ -129,6 +156,10 @@ class IEEEScraper:
                 detail_link = title_elem.get("href") if title_elem else ""
                 if detail_link and detail_link.startswith("/"):
                     detail_link = "https://ieeexplore.ieee.org" + detail_link
+                    
+                if detail_link in seen_links:
+                    continue
+                seen_links.add(detail_link)
                     
                 author_elem = row.select_one(".author, p.author")
                 author = author_elem.text.strip() if author_elem else "N/A"
@@ -251,29 +282,25 @@ class IEEEScraper:
         await self.page.goto(detail_url, wait_until="domcontentloaded")
         await asyncio.sleep(2)
         
-        # Inject Javascript to fetch the PDF and save it as a Blob, then trigger HTML5 download
-        # This keeps the request in context containing the Tongji cookies!
-        js_code = f"""
-        async () => {{
-            const response = await fetch('{pdf_url}');
-            if (!response.ok) throw new Error('PDF Network response was not ok');
-            const blob = await response.blob();
-            const url = window.URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.style.display = 'none';
-            a.href = url;
-            a.download = 'ieee_{arnumber}.pdf';
-            document.body.appendChild(a);
-            a.click();
-            window.URL.revokeObjectURL(url);
-        }}
-        """
+        file_path = os.path.join(output_dir, f"ieee_{arnumber}.pdf")
+        
+        # Action: A-tag emulation triggered 418 inside IEEE WAF since it's an untrusted DOM Event.
+        # Action Update: We natively transition page via evaluate JS. The Preferences JSON triggers immediate DL.
         try:
+            file_path = os.path.join(output_dir, f"ieee_{arnumber}.pdf")
+            
+            js_code = f"window.location.href = '{pdf_url}';"
+            
             async with self.page.expect_download(timeout=60000) as download_info:
                 await self.page.evaluate(js_code)
+                
             download = await download_info.value
-            file_path = os.path.join(output_dir, download.suggested_filename)
             await download.save_as(file_path)
+            
+            # Additional size verify
+            if os.path.getsize(file_path) < 70000:
+                return f"Error: Download generated successfully but size seems to be an HTML trap ({os.path.getsize(file_path)} bytes)."
+                
             return file_path
         except Exception as e:
             return f"Error downloading IEEE PDF: {str(e)}"

@@ -21,7 +21,7 @@ class ArxivScraper:
     async def close(self):
         pass
 
-    async def search_papers(self, query: str, search_field: str = "all", db_scope: str = "", source_type: str = "all", start_index: int = 0, limit: int = 10) -> Dict:
+    async def search_papers(self, query: str, search_field: str = "all", db_scope: str = "", source_type: str = "all", start_year: int = None, end_year: int = None, sort_by: str = "relevance", start_index: int = 0, limit: int = 10) -> Dict:
         # arXiv prefixes mapper
         field_map = {
             "全部": "all", "主题": "all",
@@ -30,18 +30,30 @@ class ArxivScraper:
         }
         prefix = field_map.get(search_field, search_field if search_field in ["all", "ti", "au", "abs", "cat", "rn", "id"] else "all")
         
-        # arxiv requires + or space for multiple words, and prefers phrase in quotes
-        safe_query = f'"{query}"' if " " in query else query
-        q_str = f"{prefix}:{safe_query}"
+        # For ArXiv, exact phrase quotes ("") are too restrictive for standard LLM multi-word query.
+        # Break down words and enforce boolean AND logic across the target prefix.
+        # We must use proper spacing around AND so arXiv parser interprets it correctly
+        # BUT explicitly doing `AND` forces strict Boolean requirement. 
+        # Better precision is achieved by just putting keywords together with spaces natively.
+        words = query.strip().split()
+        if len(words) > 1:
+            q_str = " ".join([f"{prefix}:{w}" for w in words])
+        else:
+            q_str = f"{prefix}:{query}"
         
         # arXiv category filtering
         if source_type.lower() not in ["all", "全部", ""]:
             # e.g., if source_type == "cs"
-            q_str += f"+AND+cat:{source_type}*"
+            q_str += f" AND cat:{source_type}*"
             
-        # Do not use safe=':' here, just quote the exact string but keep + as literal
-        encoded_query = urllib.parse.quote(q_str, safe='+:*')
-        api_url = f"http://export.arxiv.org/api/query?search_query={encoded_query}&start={start_index}&max_results={limit}"
+        if sort_by == "date_desc":
+            sort_str = "&sortBy=lastUpdatedDate&sortOrder=descending"
+        else:
+            sort_str = "&sortBy=relevance&sortOrder=descending"
+            
+        # Use simple quote which converts space to %20
+        encoded_query = urllib.parse.quote(q_str)
+        api_url = f"http://export.arxiv.org/api/query?search_query={encoded_query}{sort_str}&start={start_index}&max_results={limit}"
         
         def fetch_api():
             req = urllib.request.Request(api_url, headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'})

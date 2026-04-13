@@ -20,13 +20,13 @@
 | :--- | :--- |
 | `server.py` | MCP 后台服务器入口，暴露 `search_papers`, `get_paper_details`, `download_paper`, `read_paper_content` 给大语言模型客户端调用。 |
 | `cnki_scraper.py` | 中国知网抓取爬虫底层（通过 requests 轻量化封装）。 |
-| `ieee_scraper.py` | IEEE 平台搜索与免 iframe 下载的轻量级爬虫引擎。 |
+| `ieee_scraper.py` | IEEE 平台搜索与基于底层浏览器 Preferences 强制劫持 PDF 下载流的免验证抓取引擎。 |
 | `arxiv_scraper.py` | 针对物理、数学预印本的高速免限制 API 原生抓取器。 |
 | `acm_scraper.py` | 攻破 ACM Cloudflare 无感验证网段的 Playwright 隔离脚本。 |
-| `sd_scraper.py` | 针对 ScienceDirect 极端动态渲染与 DataDome 拦截防护圈深度定制的原生 Locator 点击提取机器。 |
-| `sd_auth.py` | **必要调试器**。针对 SD 平台，如长久未使用被 DataDome 拦截时，用来初始化和物理固化人类凭证的单次鉴权脚本。 |
+| `sd_scraper.py` | 针对 ScienceDirect 极端动态架构与 DataDome 拦截圈定制的爬虫。集成 React/Vue 挂载等待与隐式 md5 签名动态抓取，物理等效模拟真实点击重定向。 |
+| `sd_auth.py` | **必要调试器**。针对 SD 平台，如长久未使用被 DataDome 拦截或 IP 限流时，用来初始化和物理固化人类凭证的单次鉴权脚本。 |
 | `test_all_platforms.py` | **必要验证器**。终极全局压测程序。一键检测系统下所有 5 个端点能否正常执行检索、PDF提取和图文解偶转换（且无乱码报错）。 |
-| `.xxx_profile` (隐蔽目录) | 系统自动生成，用以储存和接管 Chromium 物理核心。请保留，这是越狱 Cloudflare 和 DataDome 的通行证数据。|
+| `.xxx_profile` (隐蔽目录) | 系统自动生成，用以储存和接管 Chromium 物理核心。请保留，这是越狱 Cloudflare 和 DataDome 的核心通行证数据。|
 
 ## 🚀 极速部署使用指南
 
@@ -51,7 +51,10 @@ python sd_auth.py
 ```bash
 python server.py
 ```
-或者在您的 `claude_desktop_config.json` 等兼容 MCP 客户端配置中直接接入本仓库的 python 环境命令。
+或者在您的 `claude_desktop_config.json` 或此类 MCP 客户端配置中直接接入本仓库的 python 环境命令。
 
-## 🛡️ 对于未来修改与反爬升级的提示
-目前，`acm` 与 `sd` 的抓取均基于 Playwright 任务栏最小化加载（配置了 `--start-minimized`）以模拟拥有真人物理显示器坐标的数据栈。**请勿**将它们调整为完全无头 (`headless=True`) 或者设定屏幕外的坐标。一旦您修改这类反指纹的机制，即可能立刻引来目标学术机构的终身 IP 黑洞拦截。
+## 🛡️ 对于未来修改与反爬升级的核心警示
+
+1. **绝对禁止纯无头模式 (`headless=True`)**：目前的抓取均基于带有 UI 渲染管线的物理浏览器实例加载（配置了 `headless=False` 等），一旦将其降级为真・无头模式，将立即触发目标学术机构（如 ScienceDirect / IEEE）的终身 IP 黑盾拦截。
+2. **禁止使用 `--start-minimized`**：实测表明，将应用窗口在启动时强制最小化会大幅增加 DataDome 的检测阈值（系统无法生成有效的鼠标与屏幕绘图区指纹），因此系统已隐去该参数，在后台保留一个物理窗体是完全必要的！
+3. **Chromium 内部 Preferences 偏好劫持**：所有 PDF 下载现已完全抛弃不可靠的 `fetch` API 或 DOM 模拟点击。代码会在启动前向 `Profile\Default\Preferences` 强行写入 `{"plugins": {"always_open_pdf_externally": true}}`。请勿随意更改 `sd_scraper.py` 或 `ieee_scraper.py` 内的 `window.location.href` 重定向路由，这是触发浏览器底层下载探针、完美旁开 Cloudflare WAF 的最后杀招。

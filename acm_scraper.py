@@ -69,7 +69,7 @@ class ACMScraper:
             await self.playwright.stop()
             self.playwright = None
 
-    async def search_papers(self, query: str, search_field: str = "AllField", db_scope: str = "", source_type: str = "all", start_index: int = 0, limit: int = 10) -> Dict:
+    async def search_papers(self, query: str, search_field: str = "AllField", db_scope: str = "", source_type: str = "all", start_year: int = None, end_year: int = None, sort_by: str = "relevance", start_index: int = 0, limit: int = 10) -> Dict:
         await self._ensure_browser()
         
         # ACM handles pages by startPage (0-indexed). By default, pageSize is 20.
