@@ -14,40 +14,40 @@ class GoogleScholarScraper:
         self.context = None
         self.page = None
     
-    async def initialize(self):
+    async def initialize(self, force_headful=False):
         import random
-        self.playwright = await async_playwright().start()
+        # Clean obsolete lockfiles to prevent context launch crashing
         profile_dir = os.path.join(os.getcwd(), ".gs_profile")
+        for lock_name in ["lockfile", "SingletonLock"]:
+            lfile = os.path.join(profile_dir, lock_name)
+            if os.path.exists(lfile):
+                try: os.remove(lfile)
+                except: pass
+
+        self.playwright = None # Will not be used anymore
+        from camoufox.async_api import AsyncCamoufox
         
-        ua_list = [
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
-            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:122.0) Gecko/20100101 Firefox/122.0"
-        ]
-        
-        self.context = await self.playwright.chromium.launch_persistent_context(
+        self.camoufox_cm = AsyncCamoufox(
+            headless=not force_headful,
             user_data_dir=profile_dir,
-            headless=False,
-            args=[
-                "--disable-blink-features=AutomationControlled",
-                "--start-minimized",
-                "--window-position=0,0"
-            ],
-            user_agent=random.choice(ua_list),
-            accept_downloads=True,
-            viewport={"width": 1280, "height": 800}
+            persistent_context=True,
+            humanize=True,
+            geoip=True
         )
-        self.page = await self.context.new_page()
+        self.context = await self.camoufox_cm.__aenter__()
+        self.page = self.context.pages[0] if self.context.pages else await self.context.new_page()
 
     async def close(self):
         if self.page:
             await self.page.close()
-        if self.context:
+            self.page = None
+        if hasattr(self, 'camoufox_cm') and self.camoufox_cm:
+            await self.camoufox_cm.__aexit__(None, None, None)
+            self.camoufox_cm = None
+            self.context = None
+        elif getattr(self, 'context', None):
             await self.context.close()
-        if self.playwright:
-            await self.playwright.stop()
+            self.context = None
 
     async def search_papers(self, query: str, search_field: str = "all", db_scope: str = "", source_type: str = "all", start_year: int = None, end_year: int = None, sort_by: str = "relevance", start_index: int = 0, limit: int = 10) -> Dict:
         import random
@@ -87,11 +87,47 @@ class GoogleScholarScraper:
         
         # Check for captcha
         if soup.select_one("form#captcha-form, div.g-recaptcha, h1:-soup-contains('One more step')"):
+            # We assume headless if no explicit tracking is used
+            if not hasattr(self, 'is_headful'):
+                print("[Anti-Bot] GS CAPTCHA detected! Relaunching headful for manual check...")
+                await self.close()
+                self.is_headful = True
+                await self.initialize(force_headful=True)
+                return await self.search_papers(query, search_field, db_scope, source_type, start_year, end_year, sort_by, start_index, limit)
+            else:
+                print(">>> PLEASE SOLVE GS CAPTCHA IN BROWSER WINDOW. Waiting up to 60s... <<<")
+                solved = False
+                for _ in range(60):
+                    html = await self.page.content()
+                    soup = bs4.BeautifulSoup(html, 'html.parser')
+                    if not soup.select_one("form#captcha-form, div.g-recaptcha, h1:-soup-contains('One more step')"):
+                        solved = True
+                        break
+                    await asyncio.sleep(1)
+                
+                if not solved:
+                    return {
+                        "total_results": "CAPTCHA (403)",
+                        "papers": [{
+                            "id": "errCaptcha",
+                            "title": "Google Scholar requested CAPTCHA but it was not solved.",
+                            "author": "System",
+                            "source": "GS Blocked",
+                            "date": "N/A",
+                            "db_type": "Error",
+                            "detail_link": "N/A"
+                        }]
+                    }
+                else: # refresh soup after solve
+                    html = await self.page.content()
+                    soup = bs4.BeautifulSoup(html, 'html.parser')
+            
+        if "We're sorry" in html or "but your computer or network may be sending automated queries" in html:
             return {
-                "total_results": "CAPTCHA (403)",
+                "total_results": "IP_BANNED",
                 "papers": [{
-                    "id": "errCaptcha",
-                    "title": "Google Scholar requested CAPTCHA. Please run gs_auth.py manually.",
+                    "id": "errIpBan",
+                    "title": "Google Scholar has HARD-BANNED this IP address. Please change your VPN/Proxy node or wait 24 hours.",
                     "author": "System",
                     "source": "GS Blocked",
                     "date": "N/A",
@@ -102,8 +138,8 @@ class GoogleScholarScraper:
 
         total_match = soup.select_one("div#gs_ab_md")
         total_text = total_match.text if total_match else "未知"
-        # usually looks like "About 1,230,000 results (0.05 sec)"
-        m = re.search(r'([\d,]+)\s+results', total_text)
+        # usually looks like "About 1,230,000 results (0.05 sec)" or "找到约 1,230,000 条结果"
+        m = re.search(r'([\d,]+)\s*(?:results|条结果)', total_text)
         total_results = m.group(1).replace(',', '') if m else "未知"
         
         results = []

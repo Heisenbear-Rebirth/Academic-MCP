@@ -14,38 +14,48 @@ class IEEEScraper:
         self.context = None
         self.page = None
     
-    async def initialize(self):
+    async def initialize(self, force_headful=False):
         import json
-        self.playwright = await async_playwright().start()
+        self.playwright = None # Will not be used anymore
         
         profile_dir = os.path.abspath(".ieee_profile")
+        for lock_name in ["lockfile", "SingletonLock"]:
+            lfile = os.path.join(profile_dir, lock_name)
+            if os.path.exists(lfile):
+                try: os.remove(lfile)
+                except: pass
+
         os.makedirs(os.path.join(profile_dir, "Default"), exist_ok=True)
         # Bypasses WAF completely; renders PDFs not internally, but drops straight to downloader
         prefs = {"plugins": {"always_open_pdf_externally": True}, "download": {"prompt_for_download": False}}
         with open(os.path.join(profile_dir, "Default", "Preferences"), "w") as f:
             json.dump(prefs, f)
             
-        # Migrate IEEE to persistent context to leverage Anti-Bot cookies globally
-        self.context = await self.playwright.chromium.launch_persistent_context(
+        from camoufox.async_api import AsyncCamoufox
+        self.camoufox_cm = AsyncCamoufox(
+            headless=not force_headful,
             user_data_dir=profile_dir,
-            headless=False,
-            args=["--disable-blink-features=AutomationControlled", "--window-position=0,0", "--start-minimized"],
-            viewport={"width": 1280, "height": 720},
-            accept_downloads=True
+            persistent_context=True,
+            humanize=True,
+            geoip=True
         )
+        self.context = await self.camoufox_cm.__aenter__()
         self.page = self.context.pages[0] if self.context.pages else await self.context.new_page()
 
     async def close(self):
-        if self.page:
+        if hasattr(self, 'page') and self.page:
             try:
                 await self.page.close()
+                self.page = None
             except:
                 pass
-        if self.context:
+        if hasattr(self, 'camoufox_cm') and self.camoufox_cm:
+            await self.camoufox_cm.__aexit__(None, None, None)
+            self.camoufox_cm = None
+            self.context = None
+        elif getattr(self, 'context', None):
             await self.context.close()
             self.context = None
-        if self.playwright:
-            await self.playwright.stop()
             self.playwright = None
 
     async def search_papers(self, query: str, search_field: str = "All", db_scope: str = "", source_type: str = "all", start_year: int = None, end_year: int = None, sort_by: str = "relevance", start_index: int = 0, limit: int = 10) -> Dict:

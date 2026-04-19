@@ -1,6 +1,8 @@
 # Python virtual environments & Cache
 venv/
+.venv/
 env/
+.cam_test/
 __pycache__/
 *.pyc
 *.pyo

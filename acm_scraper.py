@@ -15,20 +15,29 @@ class ACMScraper:
         self.context = None
         self.page = None
         
-    async def _ensure_browser(self):
+    async def _ensure_browser(self, force_headful=True):
         if not self.context:
-            print("Initializing ACM Persistent Browser Context...")
+            print(f"Initializing ACM Persistent Browser Context (Headless: {not force_headful})...")
             profile_dir = os.path.abspath(".acm_profile")
-            self.playwright = await async_playwright().start()
             
-            # Using persistent context. We MUST use headless=False to bypass CF since it detects pure headless.
-            # But we push it off-screen and start minimized so it never blocks the user's view.
-            self.context = await self.playwright.chromium.launch_persistent_context(
+            for lock_name in ["lockfile", "SingletonLock"]:
+                lfile = os.path.join(profile_dir, lock_name)
+                if os.path.exists(lfile):
+                    try: os.remove(lfile)
+                    except: pass
+                    
+            self.playwright = None # Will not be used anymore
+            from camoufox.async_api import AsyncCamoufox
+            
+            # Using OSINT stealth browser to evade hard blocks
+            self.camoufox_cm = AsyncCamoufox(
+                headless=not force_headful,
                 user_data_dir=profile_dir,
-                headless=False,
-                args=["--disable-blink-features=AutomationControlled", "--start-minimized"],
-                viewport={"width": 1280, "height": 720}
+                persistent_context=True,
+                humanize=True,
+                geoip=True
             )
+            self.context = await self.camoufox_cm.__aenter__()
             self.page = self.context.pages[0] if self.context.pages else await self.context.new_page()
             
             # Navigate to ACM to acquire initial cookies and bypass CF
@@ -36,14 +45,38 @@ class ACMScraper:
             await self.page.goto("https://dl.acm.org")
             
             # Smart wait for Cloudflare
+            cf_blocked = True
             for _ in range(15):
                 try:
                     title = await self.page.title()
                     if "Just a moment" not in title and "请稍候" not in title and "Cloudflare" not in title:
+                        cf_blocked = False
                         break
                 except Exception:
                     pass # Navigation in progress
                 await asyncio.sleep(1)
+                
+            if cf_blocked:
+                if not force_headful:
+                    print("[Anti-Bot] ACM Cloudflare blocked in headless! Relaunching headful for manual check...")
+                    await self.close()
+                    await self._ensure_browser(force_headful=True)
+                    return # Exit the current call as the recursive one handles the rest
+                else:
+                    print(">>> PLEASE WAIT OR SOLVE ACM CLOUDFLARE IN BROWSER WINDOW. Waiting up to 60s... <<<")
+                    solved = False
+                    for _ in range(60):
+                        try:
+                            title = await self.page.title()
+                            if "Just a moment" not in title and "请稍候" not in title and "Cloudflare" not in title:
+                                print("[Anti-Bot] ACM Cloudflare passed! Proceeding...")
+                                solved = True
+                                break
+                        except Exception:
+                            pass
+                        await asyncio.sleep(1)
+                    if not solved:
+                        print("ACM Cloudflare not solved in time!")
             
             # Click accept cookies banner
             try:
@@ -62,12 +95,13 @@ class ACMScraper:
         await self._ensure_browser()
 
     async def close(self):
-        if self.context:
+        if hasattr(self, 'camoufox_cm') and self.camoufox_cm:
+            await self.camoufox_cm.__aexit__(None, None, None)
+            self.camoufox_cm = None
+            self.context = None
+        elif getattr(self, 'context', None):
             await self.context.close()
             self.context = None
-        if self.playwright:
-            await self.playwright.stop()
-            self.playwright = None
 
     async def search_papers(self, query: str, search_field: str = "AllField", db_scope: str = "", source_type: str = "all", start_year: int = None, end_year: int = None, sort_by: str = "relevance", start_index: int = 0, limit: int = 10) -> Dict:
         await self._ensure_browser()
@@ -97,30 +131,56 @@ class ACMScraper:
             q_url += f"&ConceptID={source_type}"
             
         print(f"Navigating to ACM search: {q_url}")
-        res = await self.page.goto(q_url, wait_until="domcontentloaded")
-        
-        # Smart wait for Cloudflare
-        for _ in range(40):
-            try:
-                title = await self.page.title()
-                if "Just a moment" not in title and "请稍候" not in title and "Cloudflare" not in title:
-                    break
-            except Exception:
-                pass
-            await asyncio.sleep(1)
+        for attempt in range(2):
+            res = await self.page.goto(q_url, wait_until="domcontentloaded")
             
+            # Smart wait for Cloudflare
+            cf_blocked = True
+            for _ in range(15):
+                try:
+                    title = await self.page.title()
+                    if "Just a moment" not in title and "请稍候" not in title and "Cloudflare" not in title:
+                        cf_blocked = False
+                        break
+                except Exception:
+                    pass
+                await asyncio.sleep(1)
+                
+            if cf_blocked:
+                # We assume headless if no force_headful is used in our code architecture
+                if attempt == 0:
+                    print("[Anti-Bot] ACM Cloudflare blocked in headless search! Relaunching headful...")
+                    await self.close()
+                    await self._ensure_browser(force_headful=True)
+                    continue
+                else:
+                    print(">>> PLEASE WAIT OR SOLVE ACM CLOUDFLARE IN BROWSER WINDOW. Waiting 60s... <<<")
+                    solved = False
+                    for _ in range(60):
+                        try:
+                            title = await self.page.title()
+                            if "Just a moment" not in title and "请稍候" not in title and "Cloudflare" not in title:
+                                print("[Anti-Bot] ACM Cloudflare passed! Proceeding...")
+                                solved = True
+                                break
+                        except Exception:
+                            pass
+                        await asyncio.sleep(1)
+            else:
+                break
+                
         await asyncio.sleep(3) # Wait for page contents to render fully
         html = await self.page.content()
         soup = BeautifulSoup(html, "html.parser")
         
-        # Check Total Results
         total_str = "未知"
-        hits_elem = soup.select_one(".hitsLength, .result__count, span.limit")
+        hits_elem = soup.select_one(".hitsLength, .result__count, span.limit, div.issue-heading")
         if hits_elem:
-            total_str = hits_elem.text.strip().replace(",", "")
-            m = re.search(r'of\s*(\d+)', total_str)
-            if m:
-                total_str = m.group(1)
+            txt = hits_elem.text.strip()
+            numbers = re.findall(r'[\d,]+', txt)
+            if numbers:
+                valid_nums = [n.replace(',', '') for n in numbers]
+                total_str = str(max(int(n) for n in valid_nums if n.isdigit()))
                 
         papers = []
         # issue-item cards contain the results

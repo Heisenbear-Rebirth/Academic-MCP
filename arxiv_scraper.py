@@ -12,155 +12,148 @@ import re
 
 class ArxivScraper:
     def __init__(self):
-        # We do not need playwright for arXiv due to its open API
-        pass
+        self.context = None
+        self.page = None
+        self.camoufox_cm = None
         
-    async def initialize(self):
-        pass
+    async def initialize(self, force_headful=False):
+        if not self.context:
+            print(f"Initializing ArXiv Browser Context (Headless: {not force_headful})...")
+            from camoufox.async_api import AsyncCamoufox
+            self.camoufox_cm = AsyncCamoufox(
+                headless=not force_headful,
+                humanize=True
+            )
+            self.context = await self.camoufox_cm.__aenter__()
+            self.page = await self.context.new_page()
 
     async def close(self):
-        pass
+        if self.camoufox_cm:
+            await self.camoufox_cm.__aexit__(None, None, None)
+            self.camoufox_cm = None
+            self.context = None
+            self.page = None
 
     async def search_papers(self, query: str, search_field: str = "all", db_scope: str = "", source_type: str = "all", start_year: int = None, end_year: int = None, sort_by: str = "relevance", start_index: int = 0, limit: int = 10) -> Dict:
-        # arXiv prefixes mapper
+        await self.initialize()
+        
+        # Mapping to arXiv advanced search fields
         field_map = {
             "全部": "all", "主题": "all",
-            "篇名": "ti", "摘要": "abs",
-            "作者": "au", "关键词": "all",
+            "篇名": "title", "摘要": "abstract",
+            "作者": "author", "关键词": "all",
         }
-        prefix = field_map.get(search_field, search_field if search_field in ["all", "ti", "au", "abs", "cat", "rn", "id"] else "all")
+        prefix = field_map.get(search_field, search_field if search_field in ["all", "title", "author", "abstract"] else "all")
         
-        # For ArXiv, exact phrase quotes ("") are too restrictive for standard LLM multi-word query.
-        # Break down words and enforce boolean AND logic across the target prefix.
-        # We must use proper spacing around AND so arXiv parser interprets it correctly
-        # BUT explicitly doing `AND` forces strict Boolean requirement. 
-        # Better precision is achieved by just putting keywords together with spaces natively.
-        words = query.strip().split()
-        if len(words) > 1:
-            q_str = " ".join([f"{prefix}:{w}" for w in words])
-        else:
-            q_str = f"{prefix}:{query}"
+        encoded_query = urllib.parse.quote_plus(query)
+        # ArXiv frontend requires specific sizes like 25, 50, 100, 200.
+        size = 50
         
-        # arXiv category filtering
-        if source_type.lower() not in ["all", "全部", ""]:
-            # e.g., if source_type == "cs"
-            q_str += f" AND cat:{source_type}*"
-            
+        url = f"https://arxiv.org/search/?query={encoded_query}&searchtype={prefix}&abstracts=show&size={size}"
+        
         if sort_by == "date_desc":
-            sort_str = "&sortBy=lastUpdatedDate&sortOrder=descending"
+            url += "&order=-announced_date_first"
         else:
-            sort_str = "&sortBy=relevance&sortOrder=descending"
+            url += "&order=-announced_date_first" # Usually they prefer newest
             
-        # Use simple quote which converts space to %20
-        encoded_query = urllib.parse.quote(q_str)
-        api_url = f"http://export.arxiv.org/api/query?search_query={encoded_query}{sort_str}&start={start_index}&max_results={limit}"
+        print(f"Navigating to arXiv frontend: {url}")
+        await self.page.goto(url, wait_until="domcontentloaded")
+        await asyncio.sleep(3)
+        html = await self.page.content()
+        soup = bs4.BeautifulSoup(html, "html.parser")
         
-        def fetch_api():
-            req = urllib.request.Request(api_url, headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'})
-            import time
-            for _ in range(3):
-                try:
-                    with urllib.request.urlopen(req, timeout=30) as response:
-                        return response.read()
-                except Exception as e:
-                    time.sleep(2)
-            raise Exception("Failed after 3 retries")
+        total_str = "未知"
+        h1 = soup.find('h1', class_='title is-clearfix')
+        if h1:
+            m = re.search(r'([\d,]+)\s*results?', h1.text)
+            if m:
+                total_str = m.group(1).replace(",", "")
+        else:
+            print("H1 NOT FOUND. HTML snippet:")
+            print(html[:1000])
                 
-        try:
-            xml_data = await asyncio.to_thread(fetch_api)
-        except Exception as e:
-            print(f"ArXiv API Error: {e} | URL: {api_url}")
-            return {"total_results": "0", "papers": []}
-            
-        # Parse XML
-        root = ET.fromstring(xml_data)
-        
-        # arXiv uses Atom namespace
-        ns = {'atom': 'http://www.w3.org/2005/Atom', 'opensearch': 'http://a9.com/-/spec/opensearch/1.1/'}
-        
-        total_results_elem = root.find('opensearch:totalResults', ns)
-        total_results = total_results_elem.text if total_results_elem is not None else "未知"
-        
         results = []
-        for entry in root.findall('atom:entry', ns):
-            id_elem = entry.find('atom:id', ns)
-            detail_link = id_elem.text if id_elem is not None else ""
+        for li in soup.select('li.arxiv-result'):
+            if len(results) >= limit:
+                break
+                
+            title_p = li.find('p', class_='title')
+            title = title_p.text.strip() if title_p else "N/A"
             
-            title_elem = entry.find('atom:title', ns)
-            # Remove newlines from titles
-            title = title_elem.text.replace('\n', ' ').replace('  ', ' ').strip() if title_elem is not None else "N/A"
-            
-            # Fetch primary author or all authors
+            authors_p = li.find('p', class_='authors')
             authors = []
-            for author_node in entry.findall('atom:author', ns):
-                name_elem = author_node.find('atom:name', ns)
-                if name_elem is not None:
-                    authors.append(name_elem.text.strip())
+            if authors_p:
+                for a in authors_p.find_all('a'):
+                    authors.append(a.text.strip())
             author_str = ", ".join(authors) if authors else "N/A"
             
-            pub_elem = entry.find('atom:published', ns)
-            date = pub_elem.text[:4] if pub_elem is not None else "N/A" # Just extract year
+            date_p = li.find('p', class_='is-size-7')
+            date = "N/A"
+            if date_p:
+                m = re.search(r'(\d{4})', date_p.text)
+                if m:
+                    date = m.group(1)
             
-            cat_elem = entry.find('atom:category', ns)
-            source = cat_elem.attrib.get('term', 'ArXiv') if cat_elem is not None else "ArXiv"
+            link_p = li.find('p', class_='list-title')
+            detail_link = ""
+            if link_p:
+                a_tag = link_p.find('a')
+                if a_tag and 'href' in a_tag.attrs:
+                    detail_link = a_tag['href']
+                    
+            uid = hashlib.md5(detail_link.encode()).hexdigest()[:8] if detail_link else "unk"
             
-            uid = hashlib.md5(detail_link.encode()).hexdigest()[:8]
+            abstract_span = li.find('span', class_='abstract-full')
+            abstract = abstract_span.text.replace('△ Less', '').strip() if abstract_span else "N/A"
             
             results.append({
                 "id": uid,
                 "title": title,
                 "author": author_str,
-                "source": "arXiv: " + source,
+                "source": "arXiv: Frontend",
                 "date": date,
                 "db_type": "Preprint",
-                "detail_link": detail_link
+                "detail_link": detail_link,
+                "_abstract": abstract
             })
             
         return {
-            "total_results": total_results,
+            "total_results": total_str,
             "papers": results
         }
 
     async def get_paper_details(self, detail_url: str) -> Dict[str, str]:
-        # Extract ID from e.g. http://arxiv.org/abs/1905.12265v1
+        # Details are mostly extracted in the search frontend. We don't need another heavy fetch
+        # but to satisfy MCP interfaces we grab it.
         match = re.search(r'abs/([^\/]+)$', detail_url)
         if not match:
             return {"error": "Invalid arXiv url."}
         arxiv_id = match.group(1)
         
-        api_url = f"http://export.arxiv.org/api/query?id_list={arxiv_id}"
-        
-        def fetch_details():
-            req = urllib.request.Request(api_url, headers={'User-Agent': 'Mozilla/5.0'})
-            with urllib.request.urlopen(req) as response:
-                return response.read()
-                
         try:
-            xml_data = await asyncio.to_thread(fetch_details)
-            root = ET.fromstring(xml_data)
-            ns = {'atom': 'http://www.w3.org/2005/Atom'}
+            await self.initialize()
+            await self.page.goto(detail_url, wait_until="domcontentloaded")
+            await asyncio.sleep(2)
+            html = await self.page.content()
+            soup = bs4.BeautifulSoup(html, "html.parser")
             
-            entry = root.find('atom:entry', ns)
-            if entry is None:
-                return {"error": "Paper not found."}
-                
-            summary_elem = entry.find('atom:summary', ns)
-            abstract = summary_elem.text.replace('\n', ' ').strip() if summary_elem is not None else "No abstract found."
+            abs_block = soup.find('blockquote', class_='abstract')
+            abstract = abs_block.text.replace('Abstract:', '').strip() if abs_block else "No abstract found."
             
+            # arXiv doesn't explicitly have keywords on abstract page, usually subject classes.
             keywords = []
-            for cat in entry.findall('atom:category', ns):
-                term = cat.attrib.get('term')
-                if term:
-                    keywords.append(term)
-                    
+            subj_td = soup.find('td', class_='tablecell subjects')
+            if subj_td:
+                keywords.append(subj_td.text.strip())
+                
             return {
                 "url": detail_url,
                 "abstract": abstract,
                 "keywords": keywords,
-                "doi": arxiv_id # In ArXiv, the ID operates as its identifier
+                "doi": arxiv_id
             }
         except Exception as e:
-            return {"error": str(e)}
+            return {"error": f"Failed to parse arXiv frontend: {str(e)}"}
 
     async def download_paper(self, detail_url: str, output_dir: str) -> str:
         os.makedirs(output_dir, exist_ok=True)

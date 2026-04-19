@@ -14,10 +14,16 @@ class ScienceDirectScraper:
         self.context = None
         self.page = None
         
-    async def _ensure_browser(self):
+    async def _ensure_browser(self, force_headful=False):
         if not self.context:
-            print("Initializing ScienceDirect Persistent Browser Context...")
+            print(f"Initializing ScienceDirect Persistent Browser Context (Headless: {not force_headful})...")
             profile_dir = os.path.abspath(".sd_profile")
+            
+            for lock_name in ["lockfile", "SingletonLock"]:
+                lfile = os.path.join(profile_dir, lock_name)
+                if os.path.exists(lfile):
+                    try: os.remove(lfile)
+                    except: pass
             
             import json
             # Force Chrome to avoid inline rendering, allowing native Datadome-bypassed Download events
@@ -27,31 +33,54 @@ class ScienceDirectScraper:
             with open(prefs_path, "w") as f:
                 json.dump(prefs, f)
 
-            self.playwright = await async_playwright().start()
+            self.playwright = None # Will not be used anymore
+            from camoufox.async_api import AsyncCamoufox
             
-            # Using persistent context. We MUST use headless=False to bypass DataDome since it detects pure headless.
-            # But we push it off-screen and start minimized so it never blocks the user's view.
-            self.context = await self.playwright.chromium.launch_persistent_context(
+            # Using OSINT stealth browser to evade hard blocks
+            self.camoufox_cm = AsyncCamoufox(
+                headless=not force_headful,
                 user_data_dir=profile_dir,
-                headless=False,
-                args=["--disable-blink-features=AutomationControlled", "--window-position=0,0"],
-                viewport={"width": 1280, "height": 720},
-                accept_downloads=True
+                persistent_context=True,
+                humanize=True,
+                geoip=True
             )
+            self.context = await self.camoufox_cm.__aenter__()
             self.page = self.context.pages[0] if self.context.pages else await self.context.new_page()
             
             print("Navigating to SD (Resolving protections)...")
             await self.page.goto("https://www.sciencedirect.com")
             
             # Smart wait for DataDome
-            for _ in range(25):
+            cf_blocked = True
+            for _ in range(15):
                 try:
                     title = await self.page.title()
-                    if "Are you a robot" not in title and "请稍候" not in title and "Cloudflare" not in title:
+                    if "Are you a robot" not in title and "请稍候" not in title and "Cloudflare" not in title and "Just a moment" not in title:
+                        cf_blocked = False
                         break
                 except Exception:
                     pass # Navigation in progress
                 await asyncio.sleep(1)
+                
+            if cf_blocked:
+                if not force_headful:
+                    print("[Anti-Bot] SD CAPTCHA blocked in headless! Relaunching headful for manual check...")
+                    await self.close()
+                    await self._ensure_browser(force_headful=True)
+                    return
+                else:
+                    print(">>> PLEASE WAIT OR SOLVE SD CAPTCHA IN BROWSER WINDOW. Waiting up to 60s... <<<")
+                    solved = False
+                    for _ in range(60):
+                        try:
+                            title = await self.page.title()
+                            if "Are you a robot" not in title and "请稍候" not in title and "Cloudflare" not in title and "Just a moment" not in title:
+                                print("[Anti-Bot] SD CAPTCHA passed! Proceeding...")
+                                solved = True
+                                break
+                        except Exception:
+                            pass
+                        await asyncio.sleep(1)
             
             # Try to accept cookies banner if it exists
             try:
@@ -69,12 +98,13 @@ class ScienceDirectScraper:
         await self._ensure_browser()
 
     async def close(self):
-        if self.context:
+        if hasattr(self, 'camoufox_cm') and self.camoufox_cm:
+            await self.camoufox_cm.__aexit__(None, None, None)
+            self.camoufox_cm = None
+            self.context = None
+        elif getattr(self, 'context', None):
             await self.context.close()
             self.context = None
-        if self.playwright:
-            await self.playwright.stop()
-            self.playwright = None
 
     async def search_papers(self, query: str, search_field: str = "qs", db_scope: str = "", source_type: str = "all", start_year: int = None, end_year: int = None, sort_by: str = "relevance", start_index: int = 0, limit: int = 10) -> Dict:
         await self._ensure_browser()
@@ -113,19 +143,49 @@ class ScienceDirectScraper:
             q_url += f"&articleTypes={source_type}"
             
         print(f"Navigating to SD search: {q_url}")
-        res = await self.page.goto(q_url, wait_until="domcontentloaded")
         
-        # Smart wait for DataDome/CF
-        for _ in range(20):
-            try:
-                title = await self.page.title()
-                if "Are you a robot" not in title and "请稍候" not in title:
-                    break
-            except Exception:
-                pass
-            await asyncio.sleep(1)
+        for attempt in range(2):
+            await self.page.goto(q_url, wait_until="domcontentloaded")
             
-        # Playwright automatic wait and selection
+            # Smart wait for DataDome/CF
+            captcha_detected = False
+            for _ in range(15):
+                try:
+                    title = await self.page.title()
+                    html = await self.page.content()
+                    if "Are you a robot" in title or "DataDome" in html or "请稍候" in title or "Just a moment" in title:
+                        captcha_detected = True
+                        break
+                except Exception:
+                    pass
+                await asyncio.sleep(1)
+                
+            if captcha_detected:
+                if attempt == 0:
+                    print("[Anti-Bot] CAPTCHA detected in headless mode! Relaunching in headful mode for user intervention...")
+                    await self.close()
+                    await self._ensure_browser(force_headful=True)
+                    continue # Try again with headful browser
+                else:
+                    print(">>> PLEASE SOLVE THE CAPTCHA IN THE BROWSER WINDOW. Waiting up to 60 seconds... <<<")
+                    solved = False
+                    for _ in range(60):
+                        try:
+                            title = await self.page.title()
+                            html = await self.page.content()
+                            if "Are you a robot" not in title and "DataDome" not in html and "请稍候" not in title and "Just a moment" not in title:
+                                print("[Anti-Bot] CAPTCHA completely solved! Proceeding...")
+                                solved = True
+                                break
+                        except Exception:
+                            pass
+                        await asyncio.sleep(1)
+                    if not solved:
+                        print("Captcha was not solved in time.")
+            else:
+                break # Not blocked!
+            
+        # Standard Playwright automatic wait and selection
         try:
             await self.page.wait_for_selector("li.ResultItem", timeout=15000)
         except Exception:
@@ -136,12 +196,13 @@ class ScienceDirectScraper:
                 
         # Check Total Results
         total_str = "未知"
-        total_loc = self.page.locator(".search-body-results-text, h1.search-body-results-text").first
+        total_loc = self.page.locator(".search-body-results-text, h1.search-body-results-text, span.search-body-results-text, h1[data-testid='srp-page-title']").first
         if await total_loc.count() > 0:
             txt = await total_loc.inner_text()
-            m = re.search(r'([\d,]+)\s*results?', txt)
-            if m:
-                total_str = m.group(1).replace(",", "")
+            numbers = re.findall(r'[\d,]+', txt)
+            if numbers:
+                valid_nums = [n.replace(',', '') for n in numbers]
+                total_str = str(max(int(n) for n in valid_nums if n.isdigit()))
                 
         papers = []
         items = await self.page.locator("li.ResultItem").all()

@@ -1,60 +1,56 @@
-# Academic MCP Server (学术宇宙大模型能力扩展)
+# Academic MCP Server V2.6 (学术宇宙大模型强力引擎)
 
 欢迎来到 **Academic MCP Server**。
-这是一个为大规模语言模型（LLMs）量身打造的高效、突破反爬限制的论文结构化爬取抓取与 Markdown 分析服务器。它基于官方的 Model Context Protocol (MCP) 标准，底层依赖强力的 `Playwright` 内核以及最高级的 `PyMuPDF4LLM` 架构。旨在打通大模型与人类五大顶级学术数据库之间的物理与交互壁垒。
+这是一个为大规模语言模型（LLMs）量身打造的高效、突破反爬限制的论文结构化抓取与 Markdown 分析服务器。底层依托 `Camoufox` (极强隐蔽性浏览器引擎)、`Playwright` 以及 `PyMuPDF4LLM`，完美打通大模型与人类学术数据库之间的物理封锁。
 
-## 🌟 核心特性
+## 🌟 核心特性 (V2.6)
 
-- **五大顶尖学术库无缝集成**：
-  一键支持 `CNKI` (中国知网)、`IEEE Xplore`、`arXiv`、`ACM Digital Library` 以及最难攻克反爬图灵的 `ScienceDirect` (Elsevier)。
-- **降维免感级反爬绕过 (Anti-bot Bypass)**：
-  原生内置浏览器上下文持久化。针对 ACM (Cloudflare) 以及 ScienceDirect (DataDome) 设置了拟真无头化与环境隔离机制。一次点击“我不是机器人”，免疫数周验证拦截。
+- **五大顶尖学术库极限打通**：
+  融合 `CNKI` (知网)、`IEEE Xplore`、`arXiv`、`ACM Digital Library`、`ScienceDirect` (Elsevier) 和 `Google Scholar`。
+- **降维级反爬对抗机制 (Anti-bot Bypass & HITL)**：
+  - **Camoufox 物理拟真**：抛弃原生 Playwright 指纹，全面引入 Camoufox OS/WebGL 随机化指纹防屏蔽。
+  - **动态人机接管 (HITL)**：对于 ACM 和 IEEE 等配备地狱级 Cloudflare/DataDome 保护圈的平台，创新性引入了原生**有头可视化 (Headful)** 免拦截降维打击。当普通爬虫仍在 `503` 或弹窗“无限验证码”沉沦时，我们主动抛弃僵硬的无头协议，模拟拥有系统原生分辨率帧率特征的真实人类，几乎免验证直达目标。
+  - **ArXiv 前端抓取**：弃用极易被 `503 Service Unavailable` API 限流熔断的 `urllib` 请求机制，将预印本同样全面迁徙至前端 Web 物理渲染层，单次安全吐出百万级检索容量而毫发无伤。
 - **全链路自动结构化沉淀**：
-  提供从“自然语言查询 -> 提取 DOI & 摘要元数据 -> 将原始高保真包含插画图片的 PDF 静默下载 -> 二次分解重排为大模型最容易吸收的图文 Markdown”。
-- **动态深度遍历与分页映射**：
-  提供对如“学科筛选”、“文档类型细分”、“深度分页抓取”的底层字段转化包装。
+  从“查询 -> DOI 摘取 -> 高保真 PDF 静默劫持下载 -> 多模态拆解重排 Markdown（带图表独立分离）”，直接向大模型喂送黄金格式文本。
 
-## 📂 核心代码结构与必备调试器
+## 📂 核心代码结构与模块
 
 | 文件名 | 功能描述 |
 | :--- | :--- |
-| `server.py` | MCP 后台服务器入口，暴露 `search_papers`, `get_paper_details`, `download_paper`, `read_paper_content` 给大语言模型客户端调用。 |
-| `cnki_scraper.py` | 中国知网抓取爬虫底层（通过 requests 轻量化封装）。 |
-| `ieee_scraper.py` | IEEE 平台搜索与基于底层浏览器 Preferences 强制劫持 PDF 下载流的免验证抓取引擎。 |
-| `arxiv_scraper.py` | 针对物理、数学预印本的高速免限制 API 原生抓取器。 |
-| `acm_scraper.py` | 攻破 ACM Cloudflare 无感验证网段的 Playwright 隔离脚本。 |
-| `sd_scraper.py` | 针对 ScienceDirect 极端动态架构与 DataDome 拦截圈定制的爬虫。集成 React/Vue 挂载等待与隐式 md5 签名动态抓取，物理等效模拟真实点击重定向。 |
-| `sd_auth.py` | **必要调试器**。针对 SD 平台，如长久未使用被 DataDome 拦截或 IP 限流时，用来初始化和物理固化人类凭证的单次鉴权脚本。 |
-| `test_all_platforms.py` | **必要验证器**。终极全局压测程序。一键检测系统下所有 5 个端点能否正常执行检索、PDF提取和图文解偶转换（且无乱码报错）。 |
-| `.xxx_profile` (隐蔽目录) | 系统自动生成，用以储存和接管 Chromium 物理核心。请保留，这是越狱 Cloudflare 和 DataDome 的核心通行证数据。|
+| `server.py` | MCP 后台服务器入口，连接 LLM 端点。暴露 `search_papers` 等结构化接口。 |
+| `cnki_scraper.py` | 中国知网底层接口爬虫（requests 轻量化处理）。 |
+| `ieee_scraper.py` | **原生有头模式 (Headful)**。利用物理特征瞬间击穿防火墙，Preferences 拦截下载。 |
+| `arxiv_scraper.py` | **原生强行解析 (Frontend Scraping)**。规避开放 API 请求速率限制。 |
+| `acm_scraper.py` | **原生有头模式 (Headful)**。越狱 ACM 极端变态护盾圈 (Cloudflare Turnstile) 的核心隔离脚本。 |
+| `sd_scraper.py` / `gs_scraper.py` | 针对 ScienceDirect/Google Scholar。首选全静默无头执行，采用 React/Vue DOM 捕获最大数据块。若遇盾击，则优雅降级由可视化窗口倒计数 60 秒等待人类一键干预。 |
+| `.xxx_profile` | **千万留存**。保存各种验证饼干 (Cookies) 与硬件设备标识。 |
+| `scratch/` | 我们保留历史调试器、缓存数据的沙盒，它已被 Git 封印，可任意使用。 |
 
 ## 🚀 极速部署使用指南
 
 ### 1. 环境依赖组装
-本系统依托最新的异步事件总线和本地 PDF 视网膜映射转换库：
+本系统依托最新的异步事件总线配置：
 ```bash
-python -m venv venv
-.\venv\Scripts\activate
+python -m venv .venv
+.\.venv\Scripts\activate
 pip install -r requirements.txt
-playwright install chromium
+# 拉取并安装 Camoufox 真实内核环境
+python -m camoufox fetch
 ```
 
-### 2. 授权您的第一次“人机认证通行证”（可选但极度推荐）
-针对类似 ScienceDirect 这样严格的学术库，强烈建议通过以下程序获得您的 DataDome 免受控上下文：
+### 2. 启动 MCP 服务
+在您的 LLM/智能体端点内注册本 Server 或独立挂起：
 ```bash
-# 执行后只需在弹出的小窗里手动完成一次算术或点选验证码
-python sd_auth.py
+# 请必须使用虚拟环境对应的解释器
+.\.venv\Scripts\python.exe server.py
 ```
 
-### 3. 连接至大模型与 MCP 客服端
-启动服务器后台驻留在任何终端中：
-```bash
-python server.py
-```
-或者在您的 `claude_desktop_config.json` 或此类 MCP 客户端配置中直接接入本仓库的 python 环境命令。
+## 🛡️ 版本特别守则与警示
 
-## 🛡️ 对于未来修改与反爬升级的核心警示
-
-1. **绝对禁止纯无头模式 (`headless=True`)**：目前的抓取均基于带有 UI 渲染管线的物理浏览器实例加载（配置了 `headless=False` 等），一旦将其降级为真・无头模式，将立即触发目标学术机构（如 ScienceDirect / IEEE）的终身 IP 黑盾拦截。
-2. **禁止使用 `--start-minimized`**：实测表明，将应用窗口在启动时强制最小化会大幅增加 DataDome 的检测阈值（系统无法生成有效的鼠标与屏幕绘图区指纹），因此系统已隐去该参数，在后台保留一个物理窗体是完全必要的！
-3. **Chromium 内部 Preferences 偏好劫持**：所有 PDF 下载现已完全抛弃不可靠的 `fetch` API 或 DOM 模拟点击。代码会在启动前向 `Profile\Default\Preferences` 强行写入 `{"plugins": {"always_open_pdf_externally": true}}`。请勿随意更改 `sd_scraper.py` 或 `ieee_scraper.py` 内的 `window.location.href` 重定向路由，这是触发浏览器底层下载探针、完美旁开 Cloudflare WAF 的最后杀招。
+1. **绝对禁止退回单纯的无界面 `headless=True` (针对 ACM/IEEE)**：
+   不要觉得弹出一个网页窗口“不够后台”。当前的设定是经过最高血泪教训沉淀的最优解（`force_headful=True`）。把它们隐藏在后台盲目前进，只会招致 IP 重度拉黑；而坦荡地展示给反爬探针，反而能利用高完整度的人类指纹享受“绿卡”待遇。
+2. **下载拦截内核黑魔法**：
+   `ieee` 等下载中强制劫持了浏览器内部 `always_open_pdf_externally` preference 钩子，它把下载动作从“模拟抓取”变成了“浏览器级缓存投递”，确保过盾过程不可分拆。请勿在此路由链随意增减等待事件。
+3. **数字极大值寻迹纠错**：
+   针对学术网站经常更换 ClassName 导致无法匹配 `total_results` (未知文献数的 bug)，已在 SD/ACM 等全面更换基于 XPath Regex 提取纯数字阵列并 `max()` 的算法。这是鲁棒性的核心护城河。

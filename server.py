@@ -100,6 +100,54 @@ async def read_paper_content(url: str, output_dir: str, platform: str = "CNKI") 
     md_content = await scraper.read_paper_content(url, output_dir)
     return md_content
 
+@mcp.tool()
+async def convert_local_pdf(pdf_path: str, output_dir: str) -> str:
+    """
+    Convert a specific manually downloaded PDF into Markdown natively.
+    It automatically triggers HD image extraction and saves pictures to `[output_dir]/images/`.
+    The resulting `.md` file with relative image links is saved inside `output_dir`.
+    - pdf_path: Absolute path to the manually downloaded local PDF file.
+    - output_dir: Absolute path to the output directory where Markdown and images will go.
+    
+    Returns the local path of the final MD document and the first 1000 characters as a preview.
+    """
+    import os
+    import pymupdf4llm
+
+    if not os.path.exists(pdf_path):
+        return f"Error: The provided PDF path does not exist: {pdf_path}"
+    if not pdf_path.lower().endswith(".pdf"):
+        return f"Error: The provided file is not a PDF: {pdf_path}"
+
+    try:
+        images_dir = os.path.join(output_dir, "images")
+        os.makedirs(images_dir, exist_ok=True)
+        
+        # Using pymupdf4llm for HD extraction
+        md_text = pymupdf4llm.to_markdown(
+            doc=pdf_path,
+            write_images=True,
+            image_path=images_dir
+        )
+        
+        # Save MD text alongside
+        base_name = os.path.basename(pdf_path)
+        md_filename = os.path.splitext(base_name)[0] + ".md"
+        md_path = os.path.join(output_dir, md_filename)
+        
+        with open(md_path, "w", encoding="utf-8") as f:
+            f.write(md_text)
+            
+        snippet = md_text[:1000] + "\n...(More Content Available)"
+        res = (f"=== 本地转换成功 ===\n"
+               f"输入PDF: {pdf_path}\n"
+               f"Markdown及高清图像已保存至目录: {output_dir}\n"
+               f"完整的MD文件路径: {md_path}\n"
+               f"--- 以下为前1000字预览 ---\n\n{snippet}")
+        return res
+    except Exception as e:
+        return f"Conversion failed: {str(e)}"
+
 if __name__ == "__main__":
     mcp.run()
 

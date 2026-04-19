@@ -11,14 +11,20 @@ async def main():
     
     profile_dir = os.path.abspath(".sd_profile")
     
-    async with async_playwright() as p:
-        # Launch totally unhidden headful mode
-        context = await p.chromium.launch_persistent_context(
-            user_data_dir=profile_dir,
-            headless=False,
-            args=["--disable-blink-features=AutomationControlled", "--window-position=50,50"],
-            viewport={"width": 1280, "height": 720}
-        )
+    for lock_name in ["lockfile", "SingletonLock"]:
+        lfile = os.path.join(profile_dir, lock_name)
+        if os.path.exists(lfile):
+            try: os.remove(lfile)
+            except: pass
+
+    from camoufox.async_api import AsyncCamoufox
+    async with AsyncCamoufox(
+        headless=False,
+        user_data_dir=profile_dir,
+        persistent_context=True,
+        humanize=True,
+        geoip=True
+    ) as context:
         
         page = context.pages[0] if context.pages else await context.new_page()
         
