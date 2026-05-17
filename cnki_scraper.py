@@ -1,9 +1,15 @@
 import os
 import asyncio
+import hashlib
+import json
+import re
+import sys
+import urllib.parse
 from typing import List, Dict, Optional
 from playwright.async_api import async_playwright
 import bs4
 import pymupdf4llm
+from mcp_logging import safe_stderr_print
 
 class CNKIScraper:
     def __init__(self):
@@ -11,37 +17,296 @@ class CNKIScraper:
         self.browser = None
         self.context = None
         self.page = None
+        self.is_headful = False
+        self.profile_dir = os.path.abspath(".cnki_profile")
+        self.storage_state_path = os.path.abspath(os.environ.get("CNKI_STORAGE_STATE", ".cnki_storage_state.json"))
+
+    def _log(self, *parts) -> None:
+        safe_stderr_print(*parts)
     
-    async def initialize(self):
+    async def initialize(self, force_headful: bool = False):
+        await self._ensure_browser(force_headful=force_headful)
+
+    async def _ensure_browser(self, force_headful: bool = False):
+        if self.context:
+            return
+
+        self.is_headful = force_headful
+        os.makedirs(self.profile_dir, exist_ok=True)
+        for lock_name in ["lockfile", "SingletonLock"]:
+            lock_path = os.path.join(self.profile_dir, lock_name)
+            if os.path.exists(lock_path):
+                try:
+                    os.remove(lock_path)
+                except Exception:
+                    pass
+
         self.playwright = await async_playwright().start()
-        # Launch headless Chromium
-        self.browser = await self.playwright.chromium.launch(headless=True)
-        # We use a user agent to look like a normal browser
-        self.context = await self.browser.new_context(
+
+        # Persistent context keeps CNKI login / verification cookies between MCP calls.
+        self.context = await self.playwright.chromium.launch_persistent_context(
+            user_data_dir=self.profile_dir,
+            headless=not force_headful,
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            accept_downloads=True
+            accept_downloads=True,
+            ignore_https_errors=True
         )
-        self.page = await self.context.new_page()
+        await self._load_storage_state_cookies()
+        self.page = self.context.pages[0] if self.context.pages else await self.context.new_page()
+
+    async def _load_storage_state_cookies(self) -> None:
+        if not os.path.exists(self.storage_state_path):
+            return
+        try:
+            with open(self.storage_state_path, "r", encoding="utf-8") as f:
+                state = json.load(f)
+            cookies = state.get("cookies", [])
+            if cookies:
+                await self.context.add_cookies(cookies)
+                self._log(f"Loaded CNKI storage-state cookies: {len(cookies)}")
+        except Exception as e:
+            self._log(f"Could not load CNKI storage state cookies: {e}")
 
     async def close(self):
         if self.page:
-            await self.page.close()
+            try:
+                await self.page.close()
+            except Exception:
+                pass
+            self.page = None
         if self.context:
             await self.context.close()
+            self.context = None
         if self.browser:
             await self.browser.close()
+            self.browser = None
         if self.playwright:
             await self.playwright.stop()
+            self.playwright = None
 
-    async def search_papers(self, query: str, search_field: str = "主题", db_scope: str = "总库", source_type: str = "all", start_year: int = None, end_year: int = None, sort_by: str = "relevance", start_index: int = 0, limit: int = 10) -> Dict:
+    async def _goto(self, url: str, wait_until: str = "domcontentloaded", timeout: int = 45000):
+        return await self.page.goto(url, wait_until=wait_until, timeout=timeout)
+
+    async def _is_security_page(self, page=None) -> bool:
+        page = page or self.page
+        try:
+            title = await page.title()
+            html = await page.content()
+            url = page.url
+        except Exception:
+            return False
+
+        markers = [
+            "安全验证",
+            "向右滑动完成验证",
+            "拖动下方拼图完成验证",
+            "captchaType=blockPuzzle",
+            "/verify/home",
+        ]
+        haystack = f"{title}\n{url}\n{html[:4000]}"
+        return any(marker in haystack for marker in markers)
+
+    async def _wait_for_manual_security_clear(self, page=None, timeout: int = 90) -> bool:
+        page = page or self.page
+        if not await self._is_security_page(page):
+            return True
+
+        self._log(">>> CNKI security verification is open. Please solve it in the browser window. <<<")
+        for _ in range(timeout):
+            if not await self._is_security_page(page):
+                return True
+            await asyncio.sleep(1)
+        return False
+
+    async def _recover_from_security_if_needed(self, retry_callback):
+        if not await self._is_security_page():
+            return None
+
+        if not self.is_headful:
+            self._log("[Anti-Bot] CNKI security verification detected. Relaunching in headful mode...")
+            await self.close()
+            await self._ensure_browser(force_headful=True)
+            return await retry_callback()
+
+        solved = await self._wait_for_manual_security_clear(timeout=90)
+        if not solved:
+            raise RuntimeError("CNKI security verification was not solved within 90 seconds.")
+        return None
+
+    async def _apply_exact_year_filter(self, year: int) -> None:
+        """Use CNKI's sidebar year facet when the caller asks for one exact year."""
+        try:
+            await self.page.evaluate(
+                """() => {
+                    const yearGroup = document.querySelector('dl[groupid="YE"]');
+                    if (yearGroup && yearGroup.className.includes('off')) {
+                        yearGroup.querySelector('dt.tit')?.click();
+                    }
+                }"""
+            )
+            await self.page.wait_for_selector(f'dl[groupid="YE"] input[value="{year}"]', timeout=15000)
+            await self.page.evaluate(
+                """(yearValue) => {
+                    const input = document.querySelector(`dl[groupid="YE"] input[value="${yearValue}"]`);
+                    if (input && !input.checked) input.click();
+                }""",
+                str(year),
+            )
+            await asyncio.sleep(5)
+            await self.page.wait_for_selector("table.result-table-list tbody tr", timeout=15000)
+        except Exception as e:
+            self._log(f"CNKI exact year facet failed for {year}, falling back to local filtering: {e}")
+
+    @staticmethod
+    def _extract_year(date_text: str) -> Optional[int]:
+        if not date_text:
+            return None
+        match = re.search(r"(?:19|20)\d{2}", str(date_text))
+        return int(match.group(0)) if match else None
+
+    @staticmethod
+    def _clean_result_text(text: str, *, compact: bool = False) -> str:
+        text = str(text or "")
+        had_invisible_marks = bool(re.search(r"[\u200b-\u200f\u202a-\u202e\u2060-\u206f\ufeff]", text))
+        text = re.sub(r"[\u200b-\u200f\u202a-\u202e\u2060-\u206f\ufeff]", "", text)
+        if had_invisible_marks:
+            text = text.replace("版权", "").replace("知网", "")
+        text = re.sub(r"\s+", "" if compact else " ", text)
+        return text.strip()
+
+    @staticmethod
+    def _year_allowed(year: Optional[int], start_year: int = None, end_year: int = None) -> bool:
+        if start_year is None and end_year is None:
+            return True
+        if year is None:
+            return False
+        if start_year is not None and year < start_year:
+            return False
+        if end_year is not None and year > end_year:
+            return False
+        return True
+
+    @staticmethod
+    def _safe_filename(name: str, default_name: str = "cnki_paper") -> str:
+        name = (name or default_name).strip()
+        name = re.sub(r'[\\/:*?"<>|\r\n\t]+', "_", name)
+        name = re.sub(r"\s+", " ", name).strip(" .")
+        return name[:160] or default_name
+
+    @staticmethod
+    def _filename_from_content_disposition(content_disposition: str) -> Optional[str]:
+        if not content_disposition:
+            return None
+
+        match = re.search(r"filename\*=UTF-8''([^;]+)", content_disposition, flags=re.I)
+        if match:
+            return urllib.parse.unquote(match.group(1))
+
+        match = re.search(r'filename="?([^";]+)"?', content_disposition, flags=re.I)
+        if match:
+            return urllib.parse.unquote(match.group(1))
+        return None
+
+    async def _build_default_pdf_name(self) -> str:
+        title = "cnki_paper"
+        try:
+            title = (await self.page.title()).replace(" - 中国知网", "").strip() or title
+        except Exception:
+            pass
+        safe_title = self._safe_filename(title)
+        return safe_title if safe_title.lower().endswith(".pdf") else f"{safe_title}.pdf"
+
+    async def _download_via_request(self, download_url: str, output_dir: str, default_filename: str) -> Optional[str]:
+        try:
+            response = await self.context.request.get(
+                download_url,
+                headers={"Referer": self.page.url},
+                timeout=60000,
+            )
+            body = await response.body()
+        except Exception as e:
+            self._log(f"CNKI direct request download failed, will try browser click fallback: {e}")
+            return None
+
+        headers = response.headers
+        content_type = headers.get("content-type", "").lower()
+        content_disposition = headers.get("content-disposition", "")
+        final_url = getattr(response, "url", "") or ""
+
+        if body.startswith(b"%PDF") or "application/pdf" in content_type:
+            filename = self._filename_from_content_disposition(content_disposition) or default_filename
+            if not filename.lower().endswith(".pdf"):
+                filename += ".pdf"
+            file_path = os.path.join(output_dir, self._safe_filename(filename))
+            with open(file_path, "wb") as f:
+                f.write(body)
+            return file_path
+
+        text = body[:6000].decode("utf-8", errors="ignore")
+        if "login.cnki.net" in final_url or "中国知网-登录" in text or "账号登录" in text:
+            self._log("CNKI direct request reached a login page, trying browser click fallback.")
+            return None
+        if "来源应用不正确" in text:
+            self._log("CNKI rejected direct request as an invalid source application, trying browser click fallback.")
+            return None
+        if "安全验证" in text or "captcha" in final_url.lower():
+            return "Error: CNKI security verification is required before PDF download."
+        if (
+            "fee_" in final_url.lower()
+            or "settlement" in final_url.lower()
+            or "加入购物车" in text
+            or "立即支付" in text
+            or "在线支付" in text
+        ):
+            return "Error: CNKI PDF download reached a payment/order page instead of a PDF response."
+
+        return None
+
+    async def _save_download(self, download, output_dir: str, default_filename: str) -> str:
+        filename = download.suggested_filename or default_filename
+        if not filename.lower().endswith(".pdf"):
+            filename += ".pdf"
+        file_path = os.path.join(output_dir, self._safe_filename(filename))
+        await download.save_as(file_path)
+        return file_path
+
+    @staticmethod
+    def _is_valid_pdf(path: str) -> bool:
+        try:
+            with open(path, "rb") as f:
+                return f.read(4) == b"%PDF"
+        except Exception:
+            return False
+
+    async def search_papers(self, query: str, search_field: str = "主题", db_scope: str = "总库", source_type: str = "all", journal: str = None, start_year: int = None, end_year: int = None, sort_by: str = "relevance", start_index: int = 0, limit: int = 10) -> Dict:
         """
         search_papers with pagination, precise filtering, and search field support.
         """
         if not self.page:
-            await self.initialize()
-            
-        await self.page.goto("https://www.cnki.net/", wait_until="networkidle")
-        
+            await self._ensure_browser()
+
+        async def retry_current_search():
+            return await self.search_papers(
+                query=query,
+                search_field=search_field,
+                db_scope=db_scope,
+                source_type=source_type,
+                journal=journal,
+                start_year=start_year,
+                end_year=end_year,
+                sort_by=sort_by,
+                start_index=start_index,
+                limit=limit,
+            )
+             
+        await self._goto("https://www.cnki.net/")
+        try:
+            recovered = await self._recover_from_security_if_needed(retry_current_search)
+        except RuntimeError as e:
+            return {"total_results": "0", "papers": [], "error": str(e)}
+        if recovered is not None:
+            return recovered
+         
         # Select Search Field if not '主题'
         if search_field != "主题":
             try:
@@ -55,25 +320,40 @@ class CNKIScraper:
                     if await option.count() > 0:
                         await option.click()
             except Exception as e:
-                print(f"Error selecting search field: {e}")
-        
+                self._log(f"Error selecting search field: {e}")
+         
         # Fill search input
-        search_box = self.page.locator("input.search-input, #txt_search")
+        search_box = self.page.locator("textarea.search-input, #txt_SearchText, input.search-input, #txt_search, textarea[name='txt_SearchText']")
         if await search_box.count() > 0:
             await search_box.first.fill(query)
-            await self.page.locator("input.search-btn").first.click()
+            search_btn = self.page.locator(
+                "div.search-btn:has-text('检索'), input.search-btn, button:has-text('检索'), a:has-text('检索')"
+            ).filter(visible=True).first
+            await search_btn.click()
         else:
             search_box = self.page.get_by_role("textbox", name="中文文献、外文文献")
             if await search_box.count() > 0:
                 await search_box.fill(query)
                 search_btn = self.page.get_by_text("检索", exact=True)
                 await search_btn.click()
-            
+
+        try:
+            await self.page.wait_for_load_state("domcontentloaded", timeout=15000)
+        except Exception:
+            pass
+
+        try:
+            recovered = await self._recover_from_security_if_needed(retry_current_search)
+        except RuntimeError as e:
+            return {"total_results": "0", "papers": [], "error": str(e)}
+        if recovered is not None:
+            return recovered
+             
         # Wait for results page
         try:
             await self.page.wait_for_selector("table.result-table-list tbody tr", timeout=15000)
         except Exception:
-            return []
+            return {"total_results": "0", "papers": []}
 
         # Wait a moment for dynamic panels to load
         await asyncio.sleep(2)
@@ -87,6 +367,9 @@ class CNKIScraper:
                 await db_tab.click()
                 await asyncio.sleep(2)
                 await self.page.wait_for_selector("table.result-table-list tbody tr", timeout=10000)
+
+        if start_year is not None and end_year is not None and start_year == end_year:
+            await self._apply_exact_year_filter(start_year)
 
         # 2. Source Type filter ("学术期刊", "学位论文", "会议", etc.)
         if source_type != "all":
@@ -133,16 +416,17 @@ class CNKIScraper:
                 if match:
                     total_count = match.group(1).replace(",", "")
         except Exception as e:
-            print("Extract count error:", e)
+            self._log("Extract count error:", e)
         
         rows = soup.select("table.result-table-list tbody tr")
-        
+         
         results = []
         collected = 0
-        current_index = start_index
+        matched_for_offset = 0
+        year_filter_active = start_year is not None or end_year is not None
 
-        target_start_page = (start_index // 20) + 1
-        offset_in_first_page = start_index % 20
+        target_start_page = 1 if year_filter_active else (start_index // 20) + 1
+        offset_in_first_page = 0 if year_filter_active else start_index % 20
 
         # Jump to target start page if needed
         # We loop clicking "下一页" or the specific page number
@@ -163,14 +447,17 @@ class CNKIScraper:
                             await asyncio.sleep(2)
                             await self.page.wait_for_selector("table.result-table-list tbody tr", timeout=10000)
             except Exception as e:
-                print(f"Pagination error jumping to page {target_start_page}: {e}")
-        
+                self._log(f"Pagination error jumping to page {target_start_page}: {e}")
+         
         # Now collect items spanning across pages as necessary
-        while collected < limit:
+        pages_scanned = 0
+        max_pages_to_scan = max(50, ((start_index + limit) // 20) + 10) if year_filter_active else max(2, (limit // 20) + 3)
+        while collected < limit and pages_scanned < max_pages_to_scan:
+            pages_scanned += 1
             html = await self.page.content()
             soup = bs4.BeautifulSoup(html, "html.parser")
             rows = soup.select("table.result-table-list tbody tr")
-            
+             
             if not rows:
                 break # No more results
                 
@@ -181,28 +468,33 @@ class CNKIScraper:
                     break
                     
                 title_elem = row.select_one("td.name a")
-                title = title_elem.text.strip() if title_elem else "N/A"
+                title = self._clean_result_text(title_elem.text if title_elem else "N/A")
                 detail_link = title_elem.get("href") if title_elem else ""
                 if detail_link and detail_link.startswith("/"):
                     detail_link = "https://kns.cnki.net" + detail_link
                     
                 author_elem = row.select_one("td.author")
-                author = author_elem.text.strip() if author_elem else "N/A"
-                author = author.replace("\n", "").replace(" ", "")
+                author = self._clean_result_text(author_elem.text if author_elem else "N/A", compact=True)
                 
                 source_elem = row.select_one("td.source")
-                source = source_elem.text.strip() if source_elem else "N/A"
-                source = source.replace("\n", "").replace(" ", "")
+                source = self._clean_result_text(source_elem.text if source_elem else "N/A", compact=True)
                 
                 date_elem = row.select_one("td.date")
-                date = date_elem.text.strip() if date_elem else "N/A"
-                
+                date = self._clean_result_text(date_elem.text if date_elem else "N/A")
+
+                paper_year = self._extract_year(date)
+                if not self._year_allowed(paper_year, start_year=start_year, end_year=end_year):
+                    continue
+
+                if year_filter_active and matched_for_offset < start_index:
+                    matched_for_offset += 1
+                    continue
+                 
                 data_elem = row.select_one("td.data")
                 db_type = data_elem.text.strip() if data_elem else "N/A"
-                
-                import hashlib
+                 
                 uid = hashlib.md5(detail_link.encode()).hexdigest()[:8]
-                
+                 
                 results.append({
                     "id": uid,
                     "title": title,
@@ -213,7 +505,9 @@ class CNKIScraper:
                     "detail_link": detail_link
                 })
                 collected += 1
-                
+                if year_filter_active:
+                    matched_for_offset += 1
+                 
             if collected < limit:
                 try:
                     next_btn = self.page.locator("a#PageNext").first
@@ -225,7 +519,7 @@ class CNKIScraper:
                         break
                 except Exception:
                     break
-        
+         
         return {
             "total_results": total_count,
             "papers": results
@@ -267,23 +561,115 @@ class CNKIScraper:
     async def download_paper(self, detail_url: str, output_dir: str) -> str:
         """Download PDF from the detail page to output_dir."""
         if not self.page:
-            await self.initialize()
-            
+            await self._ensure_browser()
+             
         os.makedirs(output_dir, exist_ok=True)
-        await self.page.goto(detail_url, wait_until="domcontentloaded")
+        await self._goto(detail_url)
         await asyncio.sleep(2)
-        
+
+        if await self._is_security_page():
+            if not self.is_headful:
+                await self.close()
+                await self._ensure_browser(force_headful=True)
+                await self._goto(detail_url)
+            if not await self._wait_for_manual_security_clear(timeout=90):
+                return "Error: CNKI security verification was not solved within 90 seconds."
+         
         try:
-            pdf_btn = self.page.locator("#pdfDown, a:has-text('PDF下载')").first
+            default_filename = await self._build_default_pdf_name()
+            try:
+                await self.page.wait_for_function(
+                    """() => Array.from(document.querySelectorAll('#pdfDown, a'))
+                        .some(a => (a.innerText || '').includes('PDF下载') && a.href && !a.href.startsWith('javascript'))""",
+                    timeout=10000,
+                )
+            except Exception:
+                pass
+
+            pdf_btn = self.page.locator("a#pdfDown, a:has-text('PDF下载')").filter(visible=True).first
             if await pdf_btn.count() == 0:
-                pdf_btn = self.page.locator("a#DownLoadParts, a:has-text('整本下载')").first
-                
+                pdf_btn = self.page.locator("a#DownLoadParts, a:has-text('整本下载')").filter(visible=True).first
+                 
             if await pdf_btn.count() > 0:
-                async with self.page.expect_download(timeout=60000) as download_info:
-                    await pdf_btn.click()
-                download = await download_info.value
-                file_path = os.path.join(output_dir, download.suggested_filename)
-                await download.save_as(file_path)
+                href = await pdf_btn.get_attribute("href")
+                download_url = None
+                if href:
+                    download_url = urllib.parse.urljoin(self.page.url, href)
+                    direct_result = await self._download_via_request(download_url, output_dir, default_filename)
+                    if direct_result:
+                        return direct_result
+
+                download_wait_seconds = 5
+                download_task = asyncio.create_task(self.page.wait_for_event("download", timeout=download_wait_seconds * 1000))
+                popup_task = asyncio.create_task(self.context.wait_for_event("page", timeout=download_wait_seconds * 1000))
+
+                await pdf_btn.click()
+
+                file_path = None
+                popup = None
+                for _ in range(download_wait_seconds):
+                    if download_task and download_task.done():
+                        try:
+                            download = download_task.result()
+                            file_path = await self._save_download(download, output_dir, default_filename)
+                            break
+                        except Exception as e:
+                            self._log(f"CNKI main-page download event failed, waiting for popup fallback: {e}")
+                            download_task = None
+
+                    if popup_task and popup_task.done() and popup is None:
+                        try:
+                            popup = popup_task.result()
+                        except Exception as e:
+                            self._log(f"CNKI popup did not appear, waiting for main download fallback: {e}")
+                            popup_task = None
+                            popup = None
+                            await asyncio.sleep(1)
+                            continue
+                        try:
+                            await popup.wait_for_load_state("domcontentloaded", timeout=15000)
+                        except Exception:
+                            pass
+
+                        if await self._is_security_page(popup):
+                            return "Error: CNKI security verification is required before PDF download."
+
+                        try:
+                            popup_text = await popup.locator("body").inner_text(timeout=5000)
+                        except Exception:
+                            popup_text = ""
+                        if "账号登录" in popup_text or "中国知网-登录" in await popup.title():
+                            return "Error: CNKI PDF download requires login or institutional access. Please log in once in the CNKI browser profile, then retry."
+
+                        try:
+                            download = await popup.wait_for_event("download", timeout=20000)
+                            file_path = await self._save_download(download, output_dir, default_filename)
+                            break
+                        except Exception:
+                            pass
+
+                    await asyncio.sleep(1)
+
+                for task in [download_task, popup_task]:
+                    if not task:
+                        continue
+                    if task.done():
+                        try:
+                            task.result()
+                        except Exception:
+                            pass
+                    else:
+                        task.cancel()
+
+                if not file_path:
+                    if download_url:
+                        direct_result = await self._download_via_request(download_url, output_dir, default_filename)
+                        if direct_result:
+                            return direct_result
+                    return f"Error downloading CNKI PDF: no download event or PDF response was produced within {download_wait_seconds} seconds."
+
+                if not self._is_valid_pdf(file_path):
+                    return f"Error: downloaded CNKI payload is not a valid PDF: {file_path}"
                 return file_path
             else:
                 return "Download button not found."

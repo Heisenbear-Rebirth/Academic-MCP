@@ -1,6 +1,7 @@
 # Python virtual environments & Cache
 venv/
 .venv/
+.venv*/
 env/
 .cam_test/
 __pycache__/
@@ -20,6 +21,9 @@ downloads_test/
 scratch/
 scratch_test_downloads/
 scratch_*.py
+tmp/
+.codex_tmp/
+.uv-cache/
 
 # Playwright & DataDome Authenticated Persistent Context profiles
 # DO NOT track these to avoid breaking local cross-environment security states
@@ -27,8 +31,13 @@ scratch_*.py
 .acm_profile/
 .gs_profile/
 .ieee_profile/
+.cnki_profile/
+.cnki_storage_state.json
+.dawei_profile/
+.patyee_profile/
 .test_profile*/
 .playwright-mcp/
+.ms-playwright/
 
 # Debug and Logging
 *.log
@@ -41,4 +50,5 @@ sd_debug_*.png
 # Local settings / IDE
 .vscode/
 .idea/
+.claude/
 .DS_Store

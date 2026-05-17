@@ -1,5 +1,5 @@
 import asyncio
-from playwright.async_api import async_playwright
+import functools
 from bs4 import BeautifulSoup
 import os
 import hashlib
@@ -7,6 +7,17 @@ import pymupdf4llm
 from typing import Dict, List
 import urllib.parse
 import re
+import sys
+from mcp_logging import safe_stderr_print
+from runtime_config import (
+    allow_headful_fallback_for,
+    ensure_runtime_environment,
+    manual_verification_timeout_seconds,
+    project_path,
+)
+
+print = safe_stderr_print
+ensure_runtime_environment()
 
 class ACMScraper:
     def __init__(self):
@@ -14,11 +25,28 @@ class ACMScraper:
         self.browser = None
         self.context = None
         self.page = None
+        self.camoufox_cm = None
+        self.allow_headful_fallback = allow_headful_fallback_for("ACM")
+        self.manual_verification_timeout = manual_verification_timeout_seconds()
+
+    @staticmethod
+    def _is_cloudflare_title(title: str) -> bool:
+        title = (title or "").lower()
+        return any(
+            marker in title
+            for marker in [
+                "just a moment",
+                "un momento",
+                "cloudflare",
+                "checking your browser",
+                "attention required",
+            ]
+        )
         
-    async def _ensure_browser(self, force_headful=True):
+    async def _ensure_browser(self, force_headful=False):
         if not self.context:
             print(f"Initializing ACM Persistent Browser Context (Headless: {not force_headful})...")
-            profile_dir = os.path.abspath(".acm_profile")
+            profile_dir = project_path(".acm_profile")
             
             for lock_name in ["lockfile", "SingletonLock"]:
                 lfile = os.path.join(profile_dir, lock_name)
@@ -29,7 +57,8 @@ class ACMScraper:
             self.playwright = None # Will not be used anymore
             from camoufox.async_api import AsyncCamoufox
             
-            # Using OSINT stealth browser to evade hard blocks
+            # Using OSINT stealth browser to evade hard blocks.
+            # Keep ACM Camoufox-only: ordinary Chromium is less useful against ACM/Cloudflare.
             self.camoufox_cm = AsyncCamoufox(
                 headless=not force_headful,
                 user_data_dir=profile_dir,
@@ -42,14 +71,14 @@ class ACMScraper:
             
             # Navigate to ACM to acquire initial cookies and bypass CF
             print("Navigating to ACM DL (Resolving protections)...")
-            await self.page.goto("https://dl.acm.org")
+            await self.page.goto("https://dl.acm.org", wait_until="domcontentloaded", timeout=45000)
             
             # Smart wait for Cloudflare
             cf_blocked = True
             for _ in range(15):
                 try:
                     title = await self.page.title()
-                    if "Just a moment" not in title and "请稍候" not in title and "Cloudflare" not in title:
+                    if not self._is_cloudflare_title(title):
                         cf_blocked = False
                         break
                 except Exception:
@@ -58,17 +87,20 @@ class ACMScraper:
                 
             if cf_blocked:
                 if not force_headful:
+                    if not self.allow_headful_fallback:
+                        print("[Anti-Bot] ACM Cloudflare blocked headless mode; headful fallback is disabled.")
+                        return
                     print("[Anti-Bot] ACM Cloudflare blocked in headless! Relaunching headful for manual check...")
                     await self.close()
                     await self._ensure_browser(force_headful=True)
                     return # Exit the current call as the recursive one handles the rest
                 else:
-                    print(">>> PLEASE WAIT OR SOLVE ACM CLOUDFLARE IN BROWSER WINDOW. Waiting up to 60s... <<<")
+                    print(f">>> PLEASE SOLVE ACM CLOUDFLARE IN THE CAMOUFOX WINDOW. Waiting up to {self.manual_verification_timeout}s... <<<")
                     solved = False
-                    for _ in range(60):
+                    for _ in range(self.manual_verification_timeout):
                         try:
                             title = await self.page.title()
-                            if "Just a moment" not in title and "请稍候" not in title and "Cloudflare" not in title:
+                            if not self._is_cloudflare_title(title):
                                 print("[Anti-Bot] ACM Cloudflare passed! Proceeding...")
                                 solved = True
                                 break
@@ -91,19 +123,41 @@ class ACMScraper:
                 
             print("ACM context initialized successfully.")
 
+    async def _safe_page_content(self, retries: int = 8) -> str:
+        last_error = None
+        for attempt in range(retries):
+            try:
+                try:
+                    await self.page.wait_for_load_state("domcontentloaded", timeout=5000)
+                except Exception:
+                    pass
+                return await self.page.content()
+            except Exception as e:
+                last_error = e
+                if "navigating" not in str(e).lower() and attempt >= 2:
+                    break
+                await asyncio.sleep(1)
+        raise last_error
+
     async def initialize(self):
         await self._ensure_browser()
 
     async def close(self):
         if hasattr(self, 'camoufox_cm') and self.camoufox_cm:
-            await self.camoufox_cm.__aexit__(None, None, None)
+            try:
+                await self.camoufox_cm.__aexit__(None, None, None)
+            except Exception as e:
+                print(f"ACM context close failed: {e}")
             self.camoufox_cm = None
             self.context = None
         elif getattr(self, 'context', None):
             await self.context.close()
             self.context = None
+        if self.playwright:
+            await self.playwright.stop()
+            self.playwright = None
 
-    async def search_papers(self, query: str, search_field: str = "AllField", db_scope: str = "", source_type: str = "all", start_year: int = None, end_year: int = None, sort_by: str = "relevance", start_index: int = 0, limit: int = 10) -> Dict:
+    async def search_papers(self, query: str, search_field: str = "AllField", db_scope: str = "", source_type: str = "all", journal: str = None, start_year: int = None, end_year: int = None, sort_by: str = "relevance", start_index: int = 0, limit: int = 10) -> Dict:
         await self._ensure_browser()
         
         # ACM handles pages by startPage (0-indexed). By default, pageSize is 20.
@@ -139,7 +193,7 @@ class ACMScraper:
             for _ in range(15):
                 try:
                     title = await self.page.title()
-                    if "Just a moment" not in title and "请稍候" not in title and "Cloudflare" not in title:
+                    if not self._is_cloudflare_title(title):
                         cf_blocked = False
                         break
                 except Exception:
@@ -149,28 +203,45 @@ class ACMScraper:
             if cf_blocked:
                 # We assume headless if no force_headful is used in our code architecture
                 if attempt == 0:
+                    if not self.allow_headful_fallback:
+                        return {
+                            "total_results": "0",
+                            "papers": [],
+                            "error": "ACM Cloudflare verification blocked the headless MCP session. Add ACM to allow_headful_fallback_platforms in mcp_runtime_config.json for manual browser verification.",
+                        }
                     print("[Anti-Bot] ACM Cloudflare blocked in headless search! Relaunching headful...")
                     await self.close()
                     await self._ensure_browser(force_headful=True)
                     continue
                 else:
-                    print(">>> PLEASE WAIT OR SOLVE ACM CLOUDFLARE IN BROWSER WINDOW. Waiting 60s... <<<")
+                    print(f">>> PLEASE SOLVE ACM CLOUDFLARE IN THE CAMOUFOX WINDOW. Waiting up to {self.manual_verification_timeout}s... <<<")
                     solved = False
-                    for _ in range(60):
+                    for _ in range(self.manual_verification_timeout):
                         try:
                             title = await self.page.title()
-                            if "Just a moment" not in title and "请稍候" not in title and "Cloudflare" not in title:
+                            if not self._is_cloudflare_title(title):
                                 print("[Anti-Bot] ACM Cloudflare passed! Proceeding...")
                                 solved = True
                                 break
                         except Exception:
                             pass
                         await asyncio.sleep(1)
+                    if not solved:
+                        return {
+                            "total_results": "0",
+                            "papers": [],
+                            "error": "ACM Cloudflare verification was not completed before the manual verification timeout.",
+                        }
+                    try:
+                        await self.page.wait_for_load_state("domcontentloaded", timeout=10000)
+                    except Exception:
+                        pass
+                    break
             else:
                 break
                 
         await asyncio.sleep(3) # Wait for page contents to render fully
-        html = await self.page.content()
+        html = await self._safe_page_content()
         soup = BeautifulSoup(html, "html.parser")
         
         total_str = "未知"
@@ -188,8 +259,8 @@ class ACMScraper:
         
         if not items:
             print("No items found. Current title is:", await self.page.title())
-            html = await self.page.content()
-            if "cf-browser-verification" in html or "Just a moment" in html:
+            html = await self._safe_page_content()
+            if "cf-browser-verification" in html or "Just a moment" in html or "Un momento" in html:
                 print("Still stuck in Cloudflare...")
                 
         collected = 0        
@@ -208,8 +279,12 @@ class ACMScraper:
             authors = [a.text.strip() for a in authors_tags] if authors_tags else []
             author_str = ", ".join(authors) if authors else "N/A"
             
+            item_text = item.get_text(" ", strip=True)
+            year_match = re.search(r"\b(?:19|20)\d{2}\b", item_text)
             date_tag = item.select_one(".dot-separator span")
-            date = date_tag.text.strip() if date_tag else "N/A"
+            date = year_match.group(0) if year_match else (date_tag.text.strip() if date_tag else "N/A")
+            if date.lower().startswith("pages"):
+                date = "N/A"
             
             # Content Type
             type_tag = item.select_one(".issue-heading")
@@ -241,7 +316,7 @@ class ACMScraper:
         for _ in range(15):
             try:
                 title = await self.page.title()
-                if "Just a moment" not in title and "请稍候" not in title and "Cloudflare" not in title:
+                if not self._is_cloudflare_title(title):
                     break
             except Exception:
                 pass
@@ -290,22 +365,42 @@ class ACMScraper:
         
         print(f"Fetching PDF via secure Playwright context: {pdf_url}")
         
-        # Inject Javascript to fetch the blob and return it as base64 string
-        base64_data = await self.page.evaluate("""async (url) => {
-            const response = await fetch(url);
-            if (!response.ok) throw new Error('Fetch failed: ' + response.status);
-            const blob = await response.blob();
-            return new Promise((resolve, reject) => {
-                const reader = new FileReader();
-                reader.onloadend = () => resolve(reader.result.split(',')[1]);
-                reader.onerror = reject;
-                reader.readAsDataURL(blob);
-            });
-        }""", pdf_url)
-        
         import base64
-        with open(file_path, "wb") as f:
-            f.write(base64.b64decode(base64_data))
+
+        try:
+            response = await self.context.request.get(pdf_url, headers={"Referer": detail_url}, timeout=60000)
+            body = await response.body()
+            if response.status == 200 and body.startswith(b"%PDF"):
+                with open(file_path, "wb") as f:
+                    f.write(body)
+                return file_path
+            print(f"ACM context request PDF failed: status={response.status}")
+        except Exception as e:
+            print(f"ACM context request PDF failed: {e}")
+
+        try:
+            base64_data = await self.page.evaluate("""async (url) => {
+                const response = await fetch(url);
+                if (!response.ok) throw new Error('Fetch failed: ' + response.status);
+                const blob = await response.blob();
+                return new Promise((resolve, reject) => {
+                    const reader = new FileReader();
+                    reader.onloadend = () => resolve(reader.result.split(',')[1]);
+                    reader.onerror = reject;
+                    reader.readAsDataURL(blob);
+                });
+            }""", pdf_url)
+            with open(file_path, "wb") as f:
+                f.write(base64.b64decode(base64_data))
+        except Exception as e:
+            return f"Error downloading ACM PDF: {e}"
+
+        try:
+            with open(file_path, "rb") as f:
+                if f.read(4) != b"%PDF":
+                    return f"Error downloading ACM PDF: payload is not a valid PDF: {file_path}"
+        except Exception as e:
+            return f"Error validating ACM PDF: {e}"
             
         return file_path
 

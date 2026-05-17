@@ -1,11 +1,16 @@
 import os
 import asyncio
+import functools
+import sys
+from mcp_logging import safe_stderr_print
 from typing import List, Dict, Optional
 from playwright.async_api import async_playwright
 import bs4
 import pymupdf4llm
 import re
 import hashlib
+
+print = safe_stderr_print
 
 class IEEEScraper:
     def __init__(self):
@@ -58,7 +63,7 @@ class IEEEScraper:
             self.context = None
             self.playwright = None
 
-    async def search_papers(self, query: str, search_field: str = "All", db_scope: str = "", source_type: str = "all", start_year: int = None, end_year: int = None, sort_by: str = "relevance", start_index: int = 0, limit: int = 10) -> Dict:
+    async def search_papers(self, query: str, search_field: str = "All", db_scope: str = "", source_type: str = "all", journal: str = None, start_year: int = None, end_year: int = None, sort_by: str = "relevance", start_index: int = 0, limit: int = 10) -> Dict:
         if not self.page:
             await self.initialize()
             
@@ -95,6 +100,17 @@ class IEEEScraper:
             if match:
                 total_count = match.group(1).replace(",", "")
             else:
+                for pattern in [
+                    r'"totalRecords"\s*:\s*"?([\d,]+)"?',
+                    r'"totalResults"\s*:\s*"?([\d,]+)"?',
+                    r'"recordsTotal"\s*:\s*"?([\d,]+)"?',
+                    r'([\d,]+)\s+Results',
+                ]:
+                    match = re.search(pattern, html, re.IGNORECASE)
+                    if match:
+                        total_count = match.group(1).replace(",", "")
+                        break
+            if total_count == "未知":
                 # Try finding in specific classes
                 count_elem = soup.select_one("span.strong, h1, span[class*='results-display']")
                 if count_elem:
@@ -299,14 +315,51 @@ class IEEEScraper:
         try:
             file_path = os.path.join(output_dir, f"ieee_{arnumber}.pdf")
             
+            # Setup a listener to catch any response that looks like the PDF stream
+            pdf_body = []
+            async def handle_response(response):
+                if response.status == 200 and ("application/pdf" in response.headers.get("content-type", "") or response.url.endswith(".pdf") or "getPDF.jsp" in response.url):
+                    try:
+                        body = await response.body()
+                        if b"%PDF" in body[:20]:
+                            pdf_body.append(body)
+                            print(f"Intercepted direct PDF stream from {response.url[:60]}...")
+                    except Exception:
+                        pass
+                        
+            self.page.on("response", handle_response)
+            
+            download_event_task = asyncio.create_task(self.page.wait_for_event("download"))
             js_code = f"window.location.href = '{pdf_url}';"
-            
-            async with self.page.expect_download(timeout=60000) as download_info:
-                await self.page.evaluate(js_code)
+            await self.page.evaluate(js_code)
                 
-            download = await download_info.value
-            await download.save_as(file_path)
-            
+            is_downloaded = False
+            for _ in range(60):
+                if download_event_task.done():
+                    try:
+                        download = download_event_task.result()
+                        await download.save_as(file_path)
+                        is_downloaded = True
+                    except Exception as e:
+                        print("Native download failed:", e)
+                    break
+                    
+                if len(pdf_body) > 0:
+                    with open(file_path, "wb") as f:
+                        f.write(pdf_body[0])
+                    is_downloaded = True
+                    download_event_task.cancel()
+                    break
+                    
+                await asyncio.sleep(1)
+                
+            self.page.remove_listener("response", handle_response)
+            if not download_event_task.done():
+                download_event_task.cancel()
+                
+            if not is_downloaded:
+                return "Error downloading IEEE PDF: Timeout 60s exceeded waiting for download event or stream."
+                
             # Additional size verify
             if os.path.getsize(file_path) < 70000:
                 return f"Error: Download generated successfully but size seems to be an HTML trap ({os.path.getsize(file_path)} bytes)."

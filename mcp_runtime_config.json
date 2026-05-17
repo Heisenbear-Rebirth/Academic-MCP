@@ -1,0 +1,8 @@
+{
+  "playwright_browsers_path": ".ms-playwright",
+  "override_playwright_browsers_path": true,
+  "set_cwd_to_project_root": true,
+  "allow_headful_fallback": false,
+  "allow_headful_fallback_platforms": ["ACM", "SD"],
+  "manual_verification_timeout_seconds": 180
+}

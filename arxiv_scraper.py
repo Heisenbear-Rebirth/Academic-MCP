@@ -1,5 +1,8 @@
 import os
 import asyncio
+import functools
+import sys
+from mcp_logging import safe_stderr_print
 import urllib.request
 import urllib.parse
 from urllib.error import URLError, HTTPError
@@ -9,6 +12,8 @@ import bs4
 import pymupdf4llm
 import hashlib
 import re
+
+print = safe_stderr_print
 
 class ArxivScraper:
     def __init__(self):
@@ -34,7 +39,7 @@ class ArxivScraper:
             self.context = None
             self.page = None
 
-    async def search_papers(self, query: str, search_field: str = "all", db_scope: str = "", source_type: str = "all", start_year: int = None, end_year: int = None, sort_by: str = "relevance", start_index: int = 0, limit: int = 10) -> Dict:
+    async def search_papers(self, query: str, search_field: str = "all", db_scope: str = "", source_type: str = "all", journal: str = None, start_year: int = None, end_year: int = None, sort_by: str = "relevance", start_index: int = 0, limit: int = 10) -> Dict:
         await self.initialize()
         
         # Mapping to arXiv advanced search fields

@@ -1,11 +1,16 @@
 import os
 import asyncio
+import functools
+import sys
+from mcp_logging import safe_stderr_print
 from typing import List, Dict, Optional
 from playwright.async_api import async_playwright
 import bs4
 import hashlib
 import urllib.parse
 import re
+
+print = safe_stderr_print
 
 class GoogleScholarScraper:
     def __init__(self):
@@ -49,14 +54,17 @@ class GoogleScholarScraper:
             await self.context.close()
             self.context = None
 
-    async def search_papers(self, query: str, search_field: str = "all", db_scope: str = "", source_type: str = "all", start_year: int = None, end_year: int = None, sort_by: str = "relevance", start_index: int = 0, limit: int = 10) -> Dict:
+    async def search_papers(self, query: str, search_field: str = "all", db_scope: str = "", source_type: str = "all", journal: str = None, start_year: int = None, end_year: int = None, sort_by: str = "relevance", start_index: int = 0, limit: int = 10) -> Dict:
         import random
         if not self.page:
             await self.initialize()
             
         encoded_query = urllib.parse.quote(query)
         # start_index maps directly to GS 'start' param (0, 10, 20...)
-        base_url = f"https://scholar.google.com/scholar?hl=en&q={encoded_query}&start={start_index}"
+        if journal:
+            base_url = f"https://scholar.google.com/scholar?hl=en&as_q={encoded_query}&start={start_index}&as_publication={urllib.parse.quote(journal)}"
+        else:
+            base_url = f"https://scholar.google.com/scholar?hl=en&q={encoded_query}&start={start_index}"
         
         if sort_by == "date_desc":
             base_url += "&scisbd=1"
@@ -93,7 +101,7 @@ class GoogleScholarScraper:
                 await self.close()
                 self.is_headful = True
                 await self.initialize(force_headful=True)
-                return await self.search_papers(query, search_field, db_scope, source_type, start_year, end_year, sort_by, start_index, limit)
+                return await self.search_papers(query, search_field, db_scope, source_type, journal, start_year, end_year, sort_by, start_index, limit)
             else:
                 print(">>> PLEASE SOLVE GS CAPTCHA IN BROWSER WINDOW. Waiting up to 60s... <<<")
                 solved = False
@@ -143,19 +151,25 @@ class GoogleScholarScraper:
         total_results = m.group(1).replace(',', '') if m else "未知"
         
         results = []
-        rows = soup.select("div.gs_ri")
+        rows = soup.select("div.gs_ri, div.gs_r")
         
         collected = 0
+        seen_links = set()
+        
         for row in rows:
             if collected >= limit:
                 break
                 
-            title_elem = row.select_one("h3.gs_rt a")
+            title_elem = row.select_one("h3.gs_rt a") or row.select_one("h3.gs_rt")
             if not title_elem:
                 continue
                 
             title = title_elem.text.strip()
-            detail_link = title_elem.get("href", "")
+            detail_link = title_elem.get("href", "") if title_elem.name == "a" else ""
+            
+            if detail_link in seen_links and detail_link:
+                continue
+            seen_links.add(detail_link)
             
             author_pub_elem = row.select_one("div.gs_a")
             author_pub_str = author_pub_elem.text.replace('\xa0', ' ').strip() if author_pub_elem else "N/A"

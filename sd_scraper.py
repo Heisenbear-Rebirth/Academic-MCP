@@ -1,4 +1,6 @@
 import asyncio
+import functools
+import sys
 from playwright.async_api import async_playwright
 from bs4 import BeautifulSoup
 import os
@@ -7,17 +9,37 @@ import pymupdf4llm
 from typing import Dict, List
 import urllib.parse
 import re
+from mcp_logging import safe_stderr_print
+from runtime_config import allow_headful_fallback_for, ensure_runtime_environment, project_path
+
+print = safe_stderr_print
+ensure_runtime_environment()
 
 class ScienceDirectScraper:
     def __init__(self):
         self.playwright = None
         self.context = None
         self.page = None
+        self.is_headful = False
+        self.camoufox_cm = None
+        self.allow_headful_fallback = allow_headful_fallback_for("SD")
+
+    async def _launch_plain_playwright(self, profile_dir: str, force_headful: bool):
+        print("ScienceDirect Camoufox launch failed; falling back to plain Playwright Chromium.")
+        self.camoufox_cm = None
+        self.playwright = await async_playwright().start()
+        self.context = await self.playwright.chromium.launch_persistent_context(
+            user_data_dir=profile_dir,
+            headless=not force_headful,
+            accept_downloads=True,
+            ignore_https_errors=True,
+        )
+        self.page = self.context.pages[0] if self.context.pages else await self.context.new_page()
         
     async def _ensure_browser(self, force_headful=False):
         if not self.context:
             print(f"Initializing ScienceDirect Persistent Browser Context (Headless: {not force_headful})...")
-            profile_dir = os.path.abspath(".sd_profile")
+            profile_dir = project_path(".sd_profile")
             
             for lock_name in ["lockfile", "SingletonLock"]:
                 lfile = os.path.join(profile_dir, lock_name)
@@ -37,15 +59,20 @@ class ScienceDirectScraper:
             from camoufox.async_api import AsyncCamoufox
             
             # Using OSINT stealth browser to evade hard blocks
-            self.camoufox_cm = AsyncCamoufox(
-                headless=not force_headful,
-                user_data_dir=profile_dir,
-                persistent_context=True,
-                humanize=True,
-                geoip=True
-            )
-            self.context = await self.camoufox_cm.__aenter__()
-            self.page = self.context.pages[0] if self.context.pages else await self.context.new_page()
+            self.is_headful = force_headful
+            try:
+                self.camoufox_cm = AsyncCamoufox(
+                    headless=not force_headful,
+                    user_data_dir=profile_dir,
+                    persistent_context=True,
+                    humanize=True,
+                    geoip=True
+                )
+                self.context = await self.camoufox_cm.__aenter__()
+                self.page = self.context.pages[0] if self.context.pages else await self.context.new_page()
+            except OSError as e:
+                print(f"ScienceDirect Camoufox launch error: {e}")
+                await self._launch_plain_playwright(profile_dir, force_headful)
             
             print("Navigating to SD (Resolving protections)...")
             await self.page.goto("https://www.sciencedirect.com")
@@ -55,7 +82,8 @@ class ScienceDirectScraper:
             for _ in range(15):
                 try:
                     title = await self.page.title()
-                    if "Are you a robot" not in title and "请稍候" not in title and "Cloudflare" not in title and "Just a moment" not in title:
+                    html = await self.page.content()
+                    if "Are you a robot" not in title and "Are you a robot" not in html and "Egy pillanat" not in title and "请稍候" not in title and "Cloudflare" not in title and "Just a moment" not in title and "DataDome" not in html:
                         cf_blocked = False
                         break
                 except Exception:
@@ -64,6 +92,9 @@ class ScienceDirectScraper:
                 
             if cf_blocked:
                 if not force_headful:
+                    if not self.allow_headful_fallback:
+                        print("[Anti-Bot] SD CAPTCHA blocked in headless mode; headful fallback is disabled.")
+                        return
                     print("[Anti-Bot] SD CAPTCHA blocked in headless! Relaunching headful for manual check...")
                     await self.close()
                     await self._ensure_browser(force_headful=True)
@@ -74,7 +105,8 @@ class ScienceDirectScraper:
                     for _ in range(60):
                         try:
                             title = await self.page.title()
-                            if "Are you a robot" not in title and "请稍候" not in title and "Cloudflare" not in title and "Just a moment" not in title:
+                            html = await self.page.content()
+                            if "Are you a robot" not in title and "Are you a robot" not in html and "Egy pillanat" not in title and "请稍候" not in title and "Cloudflare" not in title and "Just a moment" not in title and "DataDome" not in html:
                                 print("[Anti-Bot] SD CAPTCHA passed! Proceeding...")
                                 solved = True
                                 break
@@ -99,14 +131,20 @@ class ScienceDirectScraper:
 
     async def close(self):
         if hasattr(self, 'camoufox_cm') and self.camoufox_cm:
-            await self.camoufox_cm.__aexit__(None, None, None)
+            try:
+                await self.camoufox_cm.__aexit__(None, None, None)
+            except Exception as e:
+                print(f"ScienceDirect context close failed: {e}")
             self.camoufox_cm = None
             self.context = None
         elif getattr(self, 'context', None):
             await self.context.close()
             self.context = None
+        if self.playwright:
+            await self.playwright.stop()
+            self.playwright = None
 
-    async def search_papers(self, query: str, search_field: str = "qs", db_scope: str = "", source_type: str = "all", start_year: int = None, end_year: int = None, sort_by: str = "relevance", start_index: int = 0, limit: int = 10) -> Dict:
+    async def search_papers(self, query: str, search_field: str = "qs", db_scope: str = "", source_type: str = "all", journal: str = None, start_year: int = None, end_year: int = None, sort_by: str = "relevance", start_index: int = 0, limit: int = 10) -> Dict:
         await self._ensure_browser()
         
         # SD handles pages by 'offset' (number of items to skip).
@@ -125,6 +163,9 @@ class ScienceDirectScraper:
         
         q_url = f"https://www.sciencedirect.com/search?{field}={urllib.parse.quote_plus(query)}&offset={offset}"
         
+        if journal:
+            q_url += f"&pub={urllib.parse.quote_plus(journal)}"
+            
         if sort_by == "date_desc":
             q_url += "&sortBy=date"
             
@@ -153,7 +194,7 @@ class ScienceDirectScraper:
                 try:
                     title = await self.page.title()
                     html = await self.page.content()
-                    if "Are you a robot" in title or "DataDome" in html or "请稍候" in title or "Just a moment" in title:
+                    if "Are you a robot" in title or "Are you a robot" in html or "Egy pillanat" in title or "DataDome" in html or "请稍候" in title or "Just a moment" in title:
                         captcha_detected = True
                         break
                 except Exception:
@@ -162,6 +203,12 @@ class ScienceDirectScraper:
                 
             if captcha_detected:
                 if attempt == 0:
+                    if not self.allow_headful_fallback:
+                        return {
+                            "total_results": "0",
+                            "papers": [],
+                            "error": "ScienceDirect anti-bot verification blocked the headless MCP session. Add SD to allow_headful_fallback_platforms in mcp_runtime_config.json for manual browser verification.",
+                        }
                     print("[Anti-Bot] CAPTCHA detected in headless mode! Relaunching in headful mode for user intervention...")
                     await self.close()
                     await self._ensure_browser(force_headful=True)
@@ -173,7 +220,7 @@ class ScienceDirectScraper:
                         try:
                             title = await self.page.title()
                             html = await self.page.content()
-                            if "Are you a robot" not in title and "DataDome" not in html and "请稍候" not in title and "Just a moment" not in title:
+                            if "Are you a robot" not in title and "Are you a robot" not in html and "Egy pillanat" not in title and "DataDome" not in html and "请稍候" not in title and "Just a moment" not in title:
                                 print("[Anti-Bot] CAPTCHA completely solved! Proceeding...")
                                 solved = True
                                 break
@@ -256,7 +303,8 @@ class ScienceDirectScraper:
         for _ in range(15):
             try:
                 title = await self.page.title()
-                if "Are you a robot" not in title and "请稍候" not in title:
+                html = await self.page.content()
+                if "Are you a robot" not in title and "Are you a robot" not in html and "Egy pillanat" not in title and "请稍候" not in title and "Cloudflare" not in title and "Just a moment" not in title and "DataDome" not in html:
                     break
             except Exception:
                 pass
@@ -306,6 +354,36 @@ class ScienceDirectScraper:
             except Exception as e:
                 print(f"Selector wait timeout, button might be delayed or unavailable: {e}")
                 
+            import re
+            pii_match = re.search(r'/pii/([A-Z0-9]+)', detail_url)
+            safe_name = pii_match.group(1) if pii_match else "unknown_pii"
+            
+            # Check for DataDome or wait for the PDF link to appear
+            try:
+                await self.page.wait_for_selector(f'a[href*="/pdfft"]', timeout=20000)
+            except Exception:
+                # Might be DataDome on the detail page!
+                html = await self.page.content()
+                title = await self.page.title()
+                if "Are you a robot" in title or "Are you a robot" in html or "DataDome" in html or "请稍候" in title or "Just a moment" in title:
+                    if not getattr(self, 'is_headful', False):
+                        if not self.allow_headful_fallback:
+                            return "Error: ScienceDirect verification blocked the detail page in headless mode. Add SD to allow_headful_fallback_platforms for manual verification."
+                        print("[Anti-Bot] CAPTCHA detected on detail page! Relaunching in headful mode...")
+                        await self.close()
+                        await self._ensure_browser(force_headful=True)
+                        self.is_headful = True
+                        return await self.download_paper(detail_url, output_dir)
+                    else:
+                        print(">>> PLEASE SOLVE DATADOME CAPTCHA... Waiting up to 60 seconds... <<<")
+                        for _ in range(60):
+                            html = await self.page.content()
+                            title = await self.page.title()
+                            if "Are you a robot" not in title and "Are you a robot" not in html and "DataDome" not in html and "请稍候" not in title and "Just a moment" not in title:
+                                break
+                            await asyncio.sleep(1)
+                        await self.page.wait_for_selector(f'a[href*="/pdfft"]', timeout=15000)
+
             # Dynamically extract the PDF link matching the current PII, bypassing text quirks like &nbsp;
             js_code_extract = """
             (targetPii) => {
@@ -318,30 +396,153 @@ class ScienceDirectScraper:
             pdf_url = await self.page.evaluate(js_code_extract, safe_name)
             
             if not pdf_url:
-                print(f"Could not find the true PDF link with md5 token on the page for {safe_name}.")
+                html = await self.page.content()
+                with open("scratch/dump_fail.html", "w", encoding="utf-8") as f:
+                    f.write(html)
+                print(f"Could not find the true PDF link with md5 token on the page for {safe_name}. HTML dumped to dump_fail.html")
                 return "Error: Could not locate the native View PDF button."
                 
             print(f"Discovered signed PDF URL: {pdf_url}")
             
-            # We strictly bypass Datadome proxy walls by emulating a true navigation event!
-            js_code = f"window.location.href = '{pdf_url}';"
-            
             import re
             pii_match = re.search(r'/pii/([A-Z0-9]+)', detail_url)
             safe_name = pii_match.group(1) if pii_match else "unknown_pii"
-            
             file_path = os.path.join(output_dir, f"sd_{safe_name}.pdf")
+
+            try:
+                direct_response = await self.context.request.get(
+                    pdf_url,
+                    headers={"Referer": detail_url, "Accept": "application/pdf,*/*"},
+                    timeout=60000,
+                )
+                direct_body = await direct_response.body()
+                direct_type = direct_response.headers.get("content-type", "").lower()
+                if direct_response.status == 200 and (
+                    direct_body.startswith(b"%PDF") or "application/pdf" in direct_type
+                ):
+                    with open(file_path, "wb") as f:
+                        f.write(direct_body)
+                    return file_path
+                print(
+                    f"SD direct PDF request did not return a PDF: status={direct_response.status}, content-type={direct_type}"
+                )
+            except Exception as e:
+                print(f"SD direct PDF request failed, falling back to viewer flow: {e}")
             
-            async with self.page.expect_download(timeout=60000) as download_info:
-                await self.page.evaluate(js_code)
+            # Navigate to the EPDF viewer
+            await self.page.goto(pdf_url, wait_until="domcontentloaded")
+            
+            # Check for DataDome on the EPDF page
+            captcha_detected = False
+            for _ in range(15):
+                try:
+                    title = await self.page.title()
+                    html = await self.page.content()
+                    if "Are you a robot" in title or "Are you a robot" in html or "Egy pillanat" in title or "DataDome" in html or "请稍候" in title or "Just a moment" in title:
+                        captcha_detected = True
+                        break
+                except Exception:
+                    pass
+                await asyncio.sleep(1)
                 
-            download = await download_info.value
-            await download.save_as(file_path)
+            if captcha_detected:
+                if not getattr(self, 'is_headful', False):
+                    if not self.allow_headful_fallback:
+                        return "Error: ScienceDirect verification blocked the PDF viewer in headless mode. Add SD to allow_headful_fallback_platforms for manual verification."
+                    print("[Anti-Bot] CAPTCHA detected on PDF download! Relaunching in headful mode...")
+                    await self.close()
+                    await self._ensure_browser(force_headful=True)
+                    return await self.download_paper(detail_url, output_dir)
+                else:
+                    print(">>> PLEASE SOLVE DATADOME CAPTCHA FOR PDF VIEW. Waiting up to 60 seconds... <<<")
+                    solved = False
+                    for _ in range(60):
+                        try:
+                            title = await self.page.title()
+                            html = await self.page.content()
+                            if "Are you a robot" not in title and "Are you a robot" not in html and "Egy pillanat" not in title and "DataDome" not in html and "请稍候" not in title and "Just a moment" not in title:
+                                print("[Anti-Bot] PDF CAPTCHA solved! Proceeding...")
+                                solved = True
+                                break
+                        except Exception:
+                            pass
+                        await asyncio.sleep(1)
+                    if not solved:
+                        return "Error: Did not pass PDF DataDome captcha."
+                        
+            # We are now strictly in the EPDF viewer. Click the actual download button.
+            js_click_download = """
+            () => {
+                let btn = document.querySelector('button[aria-label="Download PDF"], a[download], a.pdf-download-btn, a#pdfLink');
+                if(btn) { btn.click(); return true; }
+                
+                // Fallback fuzzy search
+                let links = Array.from(document.querySelectorAll('a, button'));
+                let dl = links.find(el => el.innerText && el.innerText.toLowerCase().includes("download"));
+                if(dl) { dl.click(); return true; }
+                
+                return false;
+            }
+            """
             
-            # Additional check: Did we download a 51KB HTML blob indicating blockage?
-            if os.path.getsize(file_path) < 100000:
-                # Still failing, Elsevier is aggressively blocking our background traffic!
-                return f"Error: The downloaded payload ({os.path.getsize(file_path)} bytes) appears to be an HTML captcha trap instead of the PDF."
+            print("Attempting to trigger actual file download...")
+            
+            # Setup a listener to catch any response that looks like the PDF stream
+            pdf_body = []
+            async def handle_response(response):
+                if response.status == 200 and ("application/pdf" in response.headers.get("content-type", "") or response.url.endswith(".pdf") or "pdf.sciencedirectassets" in response.url):
+                    try:
+                        body = await response.body()
+                        if b"%PDF" in body[:20]:
+                            pdf_body.append(body)
+                            print(f"Intercepted direct PDF stream from {response.url[:60]}...")
+                    except Exception:
+                        pass
+                        
+            self.page.on("response", handle_response)
+            
+            download_event_task = asyncio.create_task(self.page.wait_for_event("download"))
+            
+            success = await self.page.evaluate(js_click_download)
+            if not success:
+                print("Warning: Could not find obvious download button via JS. The browser might download it automatically or it failed.")
+                
+            is_downloaded = False
+            for _ in range(60):
+                # 1. Native Download triggered?
+                if download_event_task.done():
+                    try:
+                        download = download_event_task.result()
+                        await download.save_as(file_path)
+                        is_downloaded = True
+                    except Exception as e:
+                        print("Native download event failed:", e)
+                    break
+                    
+                # 2. Intercepted PDF bytes from navigation?
+                if len(pdf_body) > 0:
+                    with open(file_path, "wb") as f:
+                        f.write(pdf_body[0])
+                    is_downloaded = True
+                    download_event_task.cancel()
+                    break
+                    
+                await asyncio.sleep(1)
+                
+            self.page.remove_listener("response", handle_response)
+            
+            if not download_event_task.done():
+                download_event_task.cancel()
+                
+            if not is_downloaded:
+                return "Error: Timed out (60s) waiting for PDF download or stream navigation."
+            
+            # Additional check
+            if os.path.exists(file_path):
+                with open(file_path, "rb") as f:
+                    head = f.read(20)
+                if b"%PDF" not in head:
+                    return f"Error: The downloaded payload ({os.path.getsize(file_path)} bytes) is NOT a valid PDF document (Missing %PDF header)."
                 
             return file_path
         except Exception as e:
