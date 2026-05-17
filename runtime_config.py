@@ -13,6 +13,8 @@ DEFAULT_CONFIG = {
     "allow_headful_fallback": False,
     "allow_headful_fallback_platforms": [],
     "manual_verification_timeout_seconds": 180,
+    "library_root": ".repo",
+    "library_enabled": True,
 }
 
 
@@ -65,3 +67,14 @@ def manual_verification_timeout_seconds() -> int:
         return max(30, int(config.get("manual_verification_timeout_seconds", 180)))
     except Exception:
         return 180
+
+
+def library_root_path() -> Path:
+    config = load_runtime_config()
+    raw = str(config.get("library_root") or ".repo")
+    return Path(project_path(raw))
+
+
+def library_enabled() -> bool:
+    config = load_runtime_config()
+    return bool(config.get("library_enabled", True))

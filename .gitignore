@@ -52,3 +52,7 @@ sd_debug_*.png
 .idea/
 .claude/
 .DS_Store
+
+# Local library (MySQL + file repo)
+.env
+.repo/

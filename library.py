@@ -1,0 +1,549 @@
+"""Local academic library: MySQL-backed metadata + canonical file repository.
+
+Design summary:
+- Identity per (platform, native_id). Native ID is extracted from the detail URL.
+- All downloaded PDFs / generated Markdown live under {library_root}/{platform}/{safe_id}/.
+- On cache miss, the scraper writes into the canonical dir; on hit, files are mirrored to the caller's
+  requested output_dir so the existing MCP contract (returns paths under output_dir) is preserved.
+- If MySQL is unreachable, the library degrades to a no-op (transparent pass-through to scrapers).
+"""
+from __future__ import annotations
+
+import asyncio
+import hashlib
+import json
+import os
+import re
+import shutil
+import threading
+import urllib.parse
+from pathlib import Path
+from typing import Any, Dict, Iterable, List, Optional, Tuple
+
+try:
+    import pymysql
+    from pymysql.cursors import DictCursor
+except Exception:  # pragma: no cover - import-time guard
+    pymysql = None
+    DictCursor = None
+
+try:
+    from dotenv import load_dotenv
+except Exception:
+    load_dotenv = None
+
+from mcp_logging import safe_stderr_print
+from runtime_config import library_enabled, library_root_path, project_path
+
+print = safe_stderr_print
+
+if load_dotenv is not None:
+    env_path = project_path(".env")
+    if os.path.exists(env_path):
+        load_dotenv(env_path)
+
+
+# ---------------------------------------------------------------------------
+# Native-ID extraction
+# ---------------------------------------------------------------------------
+
+def _qs(url: str) -> Dict[str, str]:
+    try:
+        parsed = urllib.parse.urlparse(url)
+        qs = urllib.parse.parse_qs(parsed.query)
+        return {k.lower(): v[0] for k, v in qs.items() if v}
+    except Exception:
+        return {}
+
+
+def _cnki_native_id(url: str) -> str:
+    params = _qs(url)
+    dbcode = params.get("dbcode") or params.get("dbname") or ""
+    filename = params.get("filename") or params.get("fn") or ""
+    if dbcode and filename:
+        return f"{dbcode}|{filename}"
+    if filename:
+        return filename
+    return ""
+
+
+def _ieee_native_id(url: str) -> str:
+    match = re.search(r"/document/(\d+)", url)
+    return match.group(1) if match else ""
+
+
+def _arxiv_native_id(url: str) -> str:
+    match = re.search(r"/abs/([^/?#]+)", url)
+    return match.group(1) if match else ""
+
+
+def _acm_native_id(url: str) -> str:
+    match = re.search(r"/doi/(?:abs/|full/|pdf/)?(10\.[^/?#]+/[^/?#]+)", url)
+    return match.group(1) if match else ""
+
+
+def _sd_native_id(url: str) -> str:
+    match = re.search(r"/pii/([A-Za-z0-9]+)", url)
+    return match.group(1) if match else ""
+
+
+def _gs_native_id(url: str) -> str:
+    # Google Scholar links are external. Fall back to URL hash.
+    if not url or url == "N/A":
+        return ""
+    return hashlib.sha1(url.encode("utf-8")).hexdigest()[:24]
+
+
+def _patyee_native_id(url: str) -> str:
+    params = _qs(url)
+    return params.get("pn") or ""
+
+
+def _dawei_native_id(url: str) -> str:
+    params = _qs(url)
+    return params.get("pnm") or params.get("an") or ""
+
+
+_EXTRACTORS = {
+    "CNKI": _cnki_native_id,
+    "IEEE": _ieee_native_id,
+    "ARXIV": _arxiv_native_id,
+    "ACM": _acm_native_id,
+    "SD": _sd_native_id,
+    "GS": _gs_native_id,
+    "PATYEE": _patyee_native_id,
+    "DAWEI": _dawei_native_id,
+    "DAWEISOFT": _dawei_native_id,
+    "PAT_DAWEI": _dawei_native_id,
+}
+
+
+def extract_native_id(platform: str, url: str) -> str:
+    if not url:
+        return ""
+    extractor = _EXTRACTORS.get((platform or "").upper())
+    if not extractor:
+        return ""
+    try:
+        return extractor(url) or ""
+    except Exception:
+        return ""
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+_SAFE_FS = re.compile(r"[^A-Za-z0-9._-]+")
+
+
+def _safe_segment(native_id: str) -> str:
+    """Filesystem-safe slug for a native id. Long/unsafe ids fall back to hash."""
+    if not native_id:
+        return "_unknown"
+    candidate = _SAFE_FS.sub("_", native_id).strip("._")
+    if not candidate or len(candidate) > 64:
+        digest = hashlib.md5(native_id.encode("utf-8")).hexdigest()
+        return f"id_{digest[:16]}"
+    return candidate
+
+
+def _normalize_for_hash(value: Any) -> Any:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return value.strip()
+    return value
+
+
+def compute_query_hash(platform: str, query: str, filters: Dict[str, Any]) -> str:
+    payload = {
+        "p": (platform or "").upper(),
+        "q": (query or "").strip().lower(),
+        "f": {k: _normalize_for_hash(v) for k, v in sorted(filters.items())},
+    }
+    blob = json.dumps(payload, sort_keys=True, ensure_ascii=False)
+    return hashlib.md5(blob.encode("utf-8")).hexdigest()
+
+
+# ---------------------------------------------------------------------------
+# MySQL connection management
+# ---------------------------------------------------------------------------
+
+class _LibraryUnavailable(Exception):
+    pass
+
+
+class Library:
+    """MySQL + filesystem academic cache.
+
+    The first call to :meth:`ensure_ready` initialises the schema and the file root.
+    If initialisation fails (no driver, no .env, MySQL down, etc.) the library is
+    marked disabled and every method becomes a graceful no-op.
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._ready = False
+        self._disabled_reason: Optional[str] = None
+        self._conn_kwargs: Optional[Dict[str, Any]] = None
+
+    # -- Lifecycle ------------------------------------------------------
+
+    def _load_conn_kwargs(self) -> Dict[str, Any]:
+        if not pymysql:
+            raise _LibraryUnavailable("PyMySQL is not installed. Run `pip install -r requirements.txt`.")
+        host = os.getenv("MYSQL_HOST")
+        if not host:
+            raise _LibraryUnavailable("MYSQL_HOST is not set. Copy .env.example to .env and fill in credentials.")
+        return {
+            "host": host,
+            "port": int(os.getenv("MYSQL_PORT", "3306")),
+            "user": os.getenv("MYSQL_USER", "root"),
+            "password": os.getenv("MYSQL_PASSWORD", ""),
+            "database": os.getenv("MYSQL_DATABASE", "academic_mcp"),
+            "charset": "utf8mb4",
+            "autocommit": True,
+            "cursorclass": DictCursor,
+        }
+
+    def _ensure_database(self) -> None:
+        """Create the target database if it does not exist."""
+        kwargs = dict(self._conn_kwargs)  # type: ignore[arg-type]
+        db_name = kwargs.pop("database")
+        conn = pymysql.connect(**kwargs)
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"CREATE DATABASE IF NOT EXISTS `{db_name}` "
+                    "CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
+                )
+        finally:
+            conn.close()
+
+    def _ensure_schema(self) -> None:
+        # Schema is intentionally portable down to MySQL 5.5: MEDIUMTEXT instead of JSON,
+        # ASCII charset on indexed identifier columns (so the unique key stays inside
+        # InnoDB's 767-byte prefix limit), and DATETIME columns filled via NOW() in DML.
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS papers (
+                        id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+                        platform VARCHAR(32) NOT NULL,
+                        native_id VARCHAR(255) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+                        title TEXT,
+                        author TEXT,
+                        source TEXT,
+                        pub_date VARCHAR(64),
+                        db_type VARCHAR(64),
+                        doi VARCHAR(255),
+                        detail_link TEXT,
+                        abstract MEDIUMTEXT,
+                        keywords MEDIUMTEXT,
+                        pdf_path VARCHAR(512),
+                        md_path VARCHAR(512),
+                        images_dir VARCHAR(512),
+                        extra MEDIUMTEXT,
+                        created_at DATETIME NULL,
+                        updated_at DATETIME NULL,
+                        UNIQUE KEY uniq_platform_native (platform, native_id)
+                    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+                    """
+                )
+                cur.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS search_queries (
+                        id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+                        platform VARCHAR(32) NOT NULL,
+                        query_hash CHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+                        query_text TEXT,
+                        filters MEDIUMTEXT,
+                        total_results VARCHAR(64),
+                        results MEDIUMTEXT,
+                        fetched_at DATETIME NULL,
+                        UNIQUE KEY uniq_platform_hash (platform, query_hash)
+                    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+                    """
+                )
+
+    def ensure_ready(self) -> bool:
+        if self._ready or self._disabled_reason:
+            return self._ready
+        with self._lock:
+            if self._ready or self._disabled_reason:
+                return self._ready
+            if not library_enabled():
+                self._disabled_reason = "library_enabled is false in mcp_runtime_config.json"
+                print(f"[Library] Disabled: {self._disabled_reason}")
+                return False
+            try:
+                self._conn_kwargs = self._load_conn_kwargs()
+                self._ensure_database()
+                self._ensure_schema()
+                library_root_path().mkdir(parents=True, exist_ok=True)
+            except _LibraryUnavailable as e:
+                self._disabled_reason = str(e)
+                print(f"[Library] Disabled: {self._disabled_reason}")
+                return False
+            except Exception as e:
+                self._disabled_reason = f"{type(e).__name__}: {e}"
+                print(f"[Library] Disabled after init failure: {self._disabled_reason}")
+                return False
+            self._ready = True
+            print("[Library] Ready. Schema verified, file root at:", library_root_path())
+            return True
+
+    def _connect(self):
+        assert self._conn_kwargs is not None
+        return pymysql.connect(**self._conn_kwargs)
+
+    @property
+    def enabled(self) -> bool:
+        return self._ready and not self._disabled_reason
+
+    # -- Filesystem ---------------------------------------------------
+
+    def canonical_dir(self, platform: str, native_id: str) -> Path:
+        root = library_root_path()
+        return root / (platform or "").upper() / _safe_segment(native_id)
+
+    @staticmethod
+    def _mirror_file(src: Path, dest_dir: Path) -> Path:
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        dest = dest_dir / src.name
+        if src.resolve() == dest.resolve():
+            return dest
+        shutil.copy2(src, dest)
+        return dest
+
+    @staticmethod
+    def _mirror_tree(src_dir: Path, dest_dir: Path) -> None:
+        if not src_dir.exists():
+            return
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        for entry in src_dir.iterdir():
+            target = dest_dir / entry.name
+            if entry.is_dir():
+                if target.exists():
+                    shutil.rmtree(target)
+                shutil.copytree(entry, target)
+            else:
+                shutil.copy2(entry, target)
+
+    def mirror_pdf_to(self, canonical_pdf: Path, output_dir: str) -> str:
+        out = Path(output_dir).resolve()
+        out.mkdir(parents=True, exist_ok=True)
+        if Path(canonical_pdf).parent.resolve() == out:
+            return str(canonical_pdf)
+        mirrored = self._mirror_file(Path(canonical_pdf), out)
+        return str(mirrored)
+
+    def mirror_markdown_to(self, canonical_md: Path, output_dir: str) -> str:
+        """Copy the markdown plus its sibling images/ folder to *output_dir*."""
+        out = Path(output_dir).resolve()
+        out.mkdir(parents=True, exist_ok=True)
+        canon_md = Path(canonical_md)
+        if canon_md.parent.resolve() == out:
+            return str(canon_md)
+        mirrored = self._mirror_file(canon_md, out)
+        images_src = canon_md.parent / "images"
+        if images_src.exists():
+            self._mirror_tree(images_src, out / "images")
+        return str(mirrored)
+
+    # -- Paper DAO ----------------------------------------------------
+
+    @staticmethod
+    def _row_to_paper(row: Dict[str, Any]) -> Dict[str, Any]:
+        if not row:
+            return {}
+        decoded = dict(row)
+        for json_field in ("keywords", "extra"):
+            value = decoded.get(json_field)
+            if isinstance(value, (bytes, bytearray)):
+                value = value.decode("utf-8", errors="replace")
+            if isinstance(value, str):
+                try:
+                    decoded[json_field] = json.loads(value)
+                except Exception:
+                    pass
+        return decoded
+
+    def get_paper(self, platform: str, native_id: str) -> Optional[Dict[str, Any]]:
+        if not self.enabled or not native_id:
+            return None
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT * FROM papers WHERE platform=%s AND native_id=%s LIMIT 1",
+                    ((platform or "").upper(), native_id),
+                )
+                row = cur.fetchone()
+        return self._row_to_paper(row) if row else None
+
+    _PAPER_COLS = (
+        "title", "author", "source", "pub_date", "db_type", "doi",
+        "detail_link", "abstract", "keywords", "pdf_path", "md_path",
+        "images_dir", "extra",
+    )
+
+    def upsert_paper(self, platform: str, native_id: str, **fields: Any) -> None:
+        if not self.enabled or not native_id:
+            return
+        payload = {"platform": (platform or "").upper(), "native_id": native_id}
+        for col in self._PAPER_COLS:
+            if col in fields and fields[col] is not None:
+                value = fields[col]
+                if col in ("keywords", "extra") and not isinstance(value, str):
+                    value = json.dumps(value, ensure_ascii=False)
+                payload[col] = value
+        cols = list(payload.keys())
+        placeholders = ", ".join(["%s"] * len(cols))
+        updates = ", ".join(
+            f"{c}=VALUES({c})" for c in cols if c not in ("platform", "native_id")
+        )
+        update_clause = f"{updates}, updated_at=NOW()" if updates else "updated_at=NOW()"
+        sql = (
+            f"INSERT INTO papers ({', '.join(cols)}, created_at, updated_at) "
+            f"VALUES ({placeholders}, NOW(), NOW()) "
+            f"ON DUPLICATE KEY UPDATE {update_clause}"
+        )
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(sql, [payload[c] for c in cols])
+
+    # -- Search cache -------------------------------------------------
+
+    def get_search(self, platform: str, query_hash: str) -> Optional[Dict[str, Any]]:
+        if not self.enabled:
+            return None
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT total_results, results FROM search_queries "
+                    "WHERE platform=%s AND query_hash=%s LIMIT 1",
+                    ((platform or "").upper(), query_hash),
+                )
+                row = cur.fetchone()
+        if not row:
+            return None
+        results = row.get("results")
+        if isinstance(results, (bytes, bytearray)):
+            results = results.decode("utf-8", errors="replace")
+        if isinstance(results, str):
+            try:
+                results = json.loads(results)
+            except Exception:
+                results = []
+        return {
+            "total_results": row.get("total_results") or "0",
+            "papers": results or [],
+        }
+
+    def save_search(
+        self,
+        platform: str,
+        query_hash: str,
+        query_text: str,
+        filters: Dict[str, Any],
+        total_results: Any,
+        papers: List[Dict[str, Any]],
+    ) -> None:
+        if not self.enabled:
+            return
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO search_queries
+                        (platform, query_hash, query_text, filters, total_results, results, fetched_at)
+                    VALUES (%s, %s, %s, %s, %s, %s, NOW())
+                    ON DUPLICATE KEY UPDATE
+                        query_text=VALUES(query_text),
+                        filters=VALUES(filters),
+                        total_results=VALUES(total_results),
+                        results=VALUES(results),
+                        fetched_at=NOW()
+                    """,
+                    (
+                        (platform or "").upper(),
+                        query_hash,
+                        query_text,
+                        json.dumps(filters, ensure_ascii=False, sort_keys=True),
+                        str(total_results) if total_results is not None else "0",
+                        json.dumps(papers or [], ensure_ascii=False),
+                    ),
+                )
+
+    # -- High-level helpers (async-friendly) --------------------------
+
+    async def search_or_fetch(
+        self,
+        platform: str,
+        query: str,
+        filters: Dict[str, Any],
+        fetch_coro_factory,
+    ) -> Tuple[Dict[str, Any], bool]:
+        """Return (results_dict, cache_hit). On miss, *fetch_coro_factory()* is awaited
+        to produce the fresh results, which are then persisted.
+        """
+        if not self.enabled:
+            results = await fetch_coro_factory()
+            return results, False
+
+        query_hash = compute_query_hash(platform, query, filters)
+        cached = await asyncio.to_thread(self.get_search, platform, query_hash)
+        if cached:
+            return cached, True
+
+        results = await fetch_coro_factory()
+        # Persist search cache + each paper as a side effect.
+        try:
+            await asyncio.to_thread(
+                self.save_search,
+                platform,
+                query_hash,
+                query,
+                filters,
+                results.get("total_results") if isinstance(results, dict) else None,
+                results.get("papers") if isinstance(results, dict) else [],
+            )
+            for paper in (results.get("papers") or []) if isinstance(results, dict) else []:
+                native_id = extract_native_id(platform, paper.get("detail_link") or "")
+                if not native_id:
+                    continue
+                await asyncio.to_thread(
+                    self.upsert_paper,
+                    platform,
+                    native_id,
+                    title=paper.get("title"),
+                    author=paper.get("author"),
+                    source=paper.get("source"),
+                    pub_date=paper.get("date"),
+                    db_type=paper.get("db_type"),
+                    detail_link=paper.get("detail_link"),
+                    abstract=paper.get("_abstract"),
+                )
+        except Exception as e:
+            print(f"[Library] Failed to persist search cache: {e}")
+        return results, False
+
+
+# ---------------------------------------------------------------------------
+# Singleton accessor
+# ---------------------------------------------------------------------------
+
+_library_singleton: Optional[Library] = None
+_singleton_lock = threading.Lock()
+
+
+def get_library() -> Library:
+    global _library_singleton
+    if _library_singleton is None:
+        with _singleton_lock:
+            if _library_singleton is None:
+                _library_singleton = Library()
+    _library_singleton.ensure_ready()
+    return _library_singleton

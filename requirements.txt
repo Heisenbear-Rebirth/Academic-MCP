@@ -3,3 +3,5 @@ playwright
 beautifulsoup4
 pymupdf4llm
 camoufox[geoip]
+PyMySQL
+python-dotenv

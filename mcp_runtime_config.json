@@ -4,5 +4,7 @@
   "set_cwd_to_project_root": true,
   "allow_headful_fallback": false,
   "allow_headful_fallback_platforms": ["ACM", "SD"],
-  "manual_verification_timeout_seconds": 180
+  "manual_verification_timeout_seconds": 180,
+  "library_root": ".repo",
+  "library_enabled": true
 }
