@@ -32,12 +32,14 @@ class GoogleScholarScraper:
         self.playwright = None # Will not be used anymore
         from camoufox.async_api import AsyncCamoufox
         
+        # Google Scholar aggressively shadow-blocks bots; do not block images here.
         self.camoufox_cm = AsyncCamoufox(
             headless=not force_headful,
             user_data_dir=profile_dir,
             persistent_context=True,
+            os="windows",
             humanize=True,
-            geoip=True
+            geoip=True,
         )
         self.context = await self.camoufox_cm.__aenter__()
         self.page = self.context.pages[0] if self.context.pages else await self.context.new_page()

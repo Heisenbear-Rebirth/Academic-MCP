@@ -59,12 +59,14 @@ class ACMScraper:
             
             # Using OSINT stealth browser to evade hard blocks.
             # Keep ACM Camoufox-only: ordinary Chromium is less useful against ACM/Cloudflare.
+            # ACM rides Cloudflare Turnstile + DataDome; image blocking is detectable.
             self.camoufox_cm = AsyncCamoufox(
                 headless=not force_headful,
                 user_data_dir=profile_dir,
                 persistent_context=True,
+                os="windows",
                 humanize=True,
-                geoip=True
+                geoip=True,
             )
             self.context = await self.camoufox_cm.__aenter__()
             self.page = self.context.pages[0] if self.context.pages else await self.context.new_page()

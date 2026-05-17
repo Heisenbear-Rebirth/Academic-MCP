@@ -152,7 +152,6 @@ class CNKIScraper:
                 }""",
                 str(year),
             )
-            await asyncio.sleep(5)
             await self.page.wait_for_selector("table.result-table-list tbody tr", timeout=15000)
         except Exception as e:
             self._log(f"CNKI exact year facet failed for {year}, falling back to local filtering: {e}")

@@ -25,9 +25,15 @@ class ArxivScraper:
         if not self.context:
             print(f"Initializing ArXiv Browser Context (Headless: {not force_headful})...")
             from camoufox.async_api import AsyncCamoufox
+            # ArXiv has no WAF, so we can safely strip images for faster search-page loads.
+            # i_know_what_im_doing silences Camoufox's WAF-detection warning since we
+            # explicitly only do this on the WAF-free platform.
             self.camoufox_cm = AsyncCamoufox(
                 headless=not force_headful,
-                humanize=True
+                os="windows",
+                block_images=not force_headful,
+                humanize=True,
+                i_know_what_im_doing=True,
             )
             self.context = await self.camoufox_cm.__aenter__()
             self.page = await self.context.new_page()
@@ -63,7 +69,10 @@ class ArxivScraper:
             
         print(f"Navigating to arXiv frontend: {url}")
         await self.page.goto(url, wait_until="domcontentloaded")
-        await asyncio.sleep(3)
+        try:
+            await self.page.wait_for_selector("li.arxiv-result, p.title", timeout=8000)
+        except Exception:
+            pass
         html = await self.page.content()
         soup = bs4.BeautifulSoup(html, "html.parser")
         

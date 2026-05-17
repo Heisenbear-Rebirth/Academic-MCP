@@ -186,11 +186,14 @@ class PatyeeScraper:
             print(f"[Patyee] API path failed ({e}); falling back to HTML parsing.")
 
         try:
-            await self.page.wait_for_load_state("domcontentloaded", timeout=10000)
+            await self.page.wait_for_load_state("networkidle", timeout=10000)
         except Exception:
             pass
-        await asyncio.sleep(5)
-        
+        try:
+            await self.page.wait_for_selector(".pn-info-wrap", timeout=8000)
+        except Exception:
+            pass
+
         html = await self.page.content()
         soup = BeautifulSoup(html, 'html.parser')
         

@@ -37,12 +37,15 @@ class IEEEScraper:
             json.dump(prefs, f)
             
         from camoufox.async_api import AsyncCamoufox
+        # NOTE: do not enable block_images on IEEE — its Cloudflare profile flags the
+        # missing-image-requests pattern. Speed gains come from sleep tightening only.
         self.camoufox_cm = AsyncCamoufox(
             headless=not force_headful,
             user_data_dir=profile_dir,
             persistent_context=True,
+            os="windows",
             humanize=True,
-            geoip=True
+            geoip=True,
         )
         self.context = await self.camoufox_cm.__aenter__()
         self.page = self.context.pages[0] if self.context.pages else await self.context.new_page()
@@ -87,8 +90,8 @@ class IEEEScraper:
         base_url = f"https://ieeexplore.ieee.org/search/searchresult.jsp?newsearch=true&queryText={encoded_query}{sort_str}{range_str}"
         
         await self.page.goto(base_url, wait_until="networkidle")
-        await asyncio.sleep(4)
-        
+        await asyncio.sleep(1)
+
         # Determine total results
         html = await self.page.content()
         soup = bs4.BeautifulSoup(html, 'html.parser')
@@ -154,7 +157,7 @@ class IEEEScraper:
                 else:
                     current_url = re.sub(r'pageNumber=\d+', f'pageNumber={target_start_page}', current_url)
                 await self.page.goto(current_url, wait_until="networkidle")
-                await asyncio.sleep(4)
+                await asyncio.sleep(1)
             except Exception as e:
                 print(f"Pagination error jumping to page {target_start_page}: {e}")
 

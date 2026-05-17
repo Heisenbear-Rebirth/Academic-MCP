@@ -1,7 +1,6 @@
 import asyncio
 import functools
 import sys
-from playwright.async_api import async_playwright
 from bs4 import BeautifulSoup
 import os
 import hashlib
@@ -17,62 +16,43 @@ ensure_runtime_environment()
 
 class ScienceDirectScraper:
     def __init__(self):
-        self.playwright = None
         self.context = None
         self.page = None
         self.is_headful = False
         self.camoufox_cm = None
         self.allow_headful_fallback = allow_headful_fallback_for("SD")
 
-    async def _launch_plain_playwright(self, profile_dir: str, force_headful: bool):
-        print("ScienceDirect Camoufox launch failed; falling back to plain Playwright Chromium.")
-        self.camoufox_cm = None
-        self.playwright = await async_playwright().start()
-        self.context = await self.playwright.chromium.launch_persistent_context(
-            user_data_dir=profile_dir,
-            headless=not force_headful,
-            accept_downloads=True,
-            ignore_https_errors=True,
-        )
-        self.page = self.context.pages[0] if self.context.pages else await self.context.new_page()
-        
     async def _ensure_browser(self, force_headful=False):
         if not self.context:
             print(f"Initializing ScienceDirect Persistent Browser Context (Headless: {not force_headful})...")
             profile_dir = project_path(".sd_profile")
-            
+
             for lock_name in ["lockfile", "SingletonLock"]:
                 lfile = os.path.join(profile_dir, lock_name)
                 if os.path.exists(lfile):
                     try: os.remove(lfile)
                     except: pass
-            
-            import json
-            # Force Chrome to avoid inline rendering, allowing native Datadome-bypassed Download events
-            os.makedirs(os.path.join(profile_dir, "Default"), exist_ok=True)
-            prefs_path = os.path.join(profile_dir, "Default", "Preferences")
-            prefs = {"plugins": {"always_open_pdf_externally": True}, "download": {"prompt_for_download": False}}
-            with open(prefs_path, "w") as f:
-                json.dump(prefs, f)
 
-            self.playwright = None # Will not be used anymore
             from camoufox.async_api import AsyncCamoufox
-            
-            # Using OSINT stealth browser to evade hard blocks
+
+            # Pin os=windows so the fingerprint hash stays stable across MCP restarts -- Cloudflare's
+            # cf_clearance is bound to that hash, so randomizing OS every launch invalidates it and
+            # forces a fresh manual challenge each session.
+            # Do NOT block_images: SD rides DataDome which flags the missing-image-requests pattern
+            # (Camoufox warns about this explicitly).
+            # firefox_user_prefs disables the built-in PDF viewer so downloads land as download events.
             self.is_headful = force_headful
-            try:
-                self.camoufox_cm = AsyncCamoufox(
-                    headless=not force_headful,
-                    user_data_dir=profile_dir,
-                    persistent_context=True,
-                    humanize=True,
-                    geoip=True
-                )
-                self.context = await self.camoufox_cm.__aenter__()
-                self.page = self.context.pages[0] if self.context.pages else await self.context.new_page()
-            except OSError as e:
-                print(f"ScienceDirect Camoufox launch error: {e}")
-                await self._launch_plain_playwright(profile_dir, force_headful)
+            self.camoufox_cm = AsyncCamoufox(
+                headless=not force_headful,
+                user_data_dir=profile_dir,
+                persistent_context=True,
+                os="windows",
+                humanize=True,
+                geoip=True,
+                firefox_user_prefs={"pdfjs.disabled": True},
+            )
+            self.context = await self.camoufox_cm.__aenter__()
+            self.page = self.context.pages[0] if self.context.pages else await self.context.new_page()
             
             print("Navigating to SD (Resolving protections)...")
             await self.page.goto("https://www.sciencedirect.com")
@@ -140,9 +120,6 @@ class ScienceDirectScraper:
         elif getattr(self, 'context', None):
             await self.context.close()
             self.context = None
-        if self.playwright:
-            await self.playwright.stop()
-            self.playwright = None
 
     async def search_papers(self, query: str, search_field: str = "qs", db_scope: str = "", source_type: str = "all", journal: str = None, start_year: int = None, end_year: int = None, sort_by: str = "relevance", start_index: int = 0, limit: int = 10) -> Dict:
         await self._ensure_browser()
