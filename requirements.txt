@@ -5,3 +5,7 @@ pymupdf4llm
 camoufox[geoip]
 PyMySQL
 python-dotenv
+fastapi
+uvicorn[standard]
+jinja2
+python-multipart

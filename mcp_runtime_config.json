@@ -6,5 +6,7 @@
   "allow_headful_fallback_platforms": ["ACM", "SD"],
   "manual_verification_timeout_seconds": 180,
   "library_root": ".repo",
-  "library_enabled": true
+  "library_enabled": true,
+  "library_web_host": "127.0.0.1",
+  "library_web_port": 5577
 }

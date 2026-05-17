@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}总览{% endblock %}
+{% block content %}
+<div class="stat-grid">
+  <div class="stat-box">
+    <div class="num">{{ stats.totals.papers }}</div>
+    <div class="label">论文条目</div>
+  </div>
+  <div class="stat-box">
+    <div class="num">{{ stats.totals.searches }}</div>
+    <div class="label">缓存搜索</div>
+  </div>
+  <div class="stat-box">
+    <div class="num">{{ stats.platforms|length }}</div>
+    <div class="label">覆盖平台</div>
+  </div>
+</div>
+
+<div class="card" style="margin-top:16px;">
+  <h2>按平台分布</h2>
+  {% if stats.platforms %}
+  <table>
+    <thead><tr><th>平台</th><th>论文数</th><th>PDF</th><th>Markdown</th><th></th></tr></thead>
+    <tbody>
+      {% for p in stats.platforms %}
+      <tr>
+        <td><span class="pill platform">{{ p.platform }}</span></td>
+        <td>{{ p.c }}</td>
+        <td>{{ p.pdfs or 0 }}</td>
+        <td>{{ p.mds or 0 }}</td>
+        <td><a class="btn" href="/papers?platform={{ p.platform }}">查看</a></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted">还没有任何论文入库。开始搜索或下载吧。</p>
+  {% endif %}
+</div>
+{% endblock %}

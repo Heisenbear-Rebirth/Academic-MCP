@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block title %}论文列表{% endblock %}
+{% block content %}
+<form class="filter" method="get" action="/papers">
+  <input type="text" name="q" value="{{ q }}" placeholder="标题 / 作者 / native_id 关键词">
+  <select name="platform">
+    <option value="">全部平台</option>
+    {% for opt in ["CNKI","IEEE","ARXIV","ACM","SD","GS","PATYEE","DAWEI"] %}
+    <option value="{{ opt }}" {% if platform == opt %}selected{% endif %}>{{ opt }}</option>
+    {% endfor %}
+  </select>
+  <button type="submit" class="primary">筛选</button>
+  <a class="btn" href="/papers">重置</a>
+  <span style="margin-left:auto;" class="muted">{{ total }} 条结果</span>
+</form>
+
+<div class="card" style="padding:0;">
+  <table>
+    <thead>
+      <tr>
+        <th>平台</th>
+        <th>标题</th>
+        <th>作者</th>
+        <th>日期</th>
+        <th>文件</th>
+        <th>更新时间</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in rows %}
+      <tr>
+        <td><span class="pill platform">{{ r.platform }}</span></td>
+        <td class="title-cell">
+          <a href="/papers/{{ r.platform }}/{{ r.native_id }}">{{ r.title or "(无标题)" }}</a>
+          <div class="muted">{{ r.native_id }}</div>
+        </td>
+        <td>{{ r.author or "—" }}</td>
+        <td>{{ r.pub_date or "—" }}</td>
+        <td>
+          {% if r.pdf_path %}<span class="pill has-file">PDF</span>{% else %}<span class="pill no-file">PDF</span>{% endif %}
+          {% if r.md_path %}<span class="pill has-file">MD</span>{% else %}<span class="pill no-file">MD</span>{% endif %}
+        </td>
+        <td class="muted">{{ r.updated_at }}</td>
+        <td><a class="btn" href="/papers/{{ r.platform }}/{{ r.native_id }}">详情</a></td>
+      </tr>
+      {% else %}
+      <tr><td colspan="7" class="muted" style="text-align:center;padding:24px;">没有匹配的论文。</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{% if total_pages > 1 %}
+<div class="pagination">
+  {% if page > 1 %}<a class="btn" href="/papers?{{ qs(platform=platform, q=q, page=page-1, page_size=page_size) }}">← 上一页</a>{% endif %}
+  <span class="page-info">第 {{ page }} / {{ total_pages }} 页</span>
+  {% if page < total_pages %}<a class="btn" href="/papers?{{ qs(platform=platform, q=q, page=page+1, page_size=page_size) }}">下一页 →</a>{% endif %}
+</div>
+{% endif %}
+{% endblock %}

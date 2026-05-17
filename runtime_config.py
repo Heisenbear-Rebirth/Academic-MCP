@@ -15,6 +15,8 @@ DEFAULT_CONFIG = {
     "manual_verification_timeout_seconds": 180,
     "library_root": ".repo",
     "library_enabled": True,
+    "library_web_host": "127.0.0.1",
+    "library_web_port": 5577,
 }
 
 
@@ -78,3 +80,16 @@ def library_root_path() -> Path:
 def library_enabled() -> bool:
     config = load_runtime_config()
     return bool(config.get("library_enabled", True))
+
+
+def library_web_host() -> str:
+    config = load_runtime_config()
+    return str(config.get("library_web_host") or "127.0.0.1")
+
+
+def library_web_port() -> int:
+    config = load_runtime_config()
+    try:
+        return int(config.get("library_web_port", 5577))
+    except Exception:
+        return 5577

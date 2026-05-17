@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block title %}搜索缓存{% endblock %}
+{% block content %}
+<div class="card" style="padding:0;">
+  <table>
+    <thead>
+      <tr>
+        <th>平台</th>
+        <th>查询</th>
+        <th>过滤条件</th>
+        <th>命中数</th>
+        <th>缓存时间</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in rows %}
+      <tr>
+        <td><span class="pill platform">{{ r.platform }}</span></td>
+        <td class="title-cell">{{ r.query_text }}<div class="muted"><code>{{ r.query_hash }}</code></div></td>
+        <td>
+          {% if r.filters is mapping %}
+            {% for k, v in r.filters.items() %}{% if v not in (None, "", 0) %}<span class="pill">{{ k }}={{ v }}</span> {% endif %}{% endfor %}
+          {% else %}{{ r.filters }}{% endif %}
+        </td>
+        <td>{{ r.total_results }}</td>
+        <td class="muted">{{ r.fetched_at }}</td>
+        <td>
+          <form action="/searches/{{ r.id }}/delete" method="post" style="display:inline;"
+                onsubmit="return confirm('删除该搜索缓存？同 query 下次会重新抓取。');">
+            <button type="submit" class="danger">删除</button>
+          </form>
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="6" class="muted" style="text-align:center;padding:24px;">还没有任何搜索缓存。</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{% if total_pages > 1 %}
+<div class="pagination">
+  {% if page > 1 %}<a class="btn" href="/searches?{{ qs(page=page-1, page_size=page_size) }}">← 上一页</a>{% endif %}
+  <span class="page-info">第 {{ page }} / {{ total_pages }} 页</span>
+  {% if page < total_pages %}<a class="btn" href="/searches?{{ qs(page=page+1, page_size=page_size) }}">下一页 →</a>{% endif %}
+</div>
+{% endif %}
+{% endblock %}

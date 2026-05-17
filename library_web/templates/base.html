@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}学术库管理{% endblock %} · Academic Library Console</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header>
+  <h1>📚 学术库</h1>
+  <nav>
+    <a href="/" class="{% if request.url.path == '/' %}active{% endif %}">总览</a>
+    <a href="/papers" class="{% if request.url.path.startswith('/papers') %}active{% endif %}">论文</a>
+    <a href="/searches" class="{% if request.url.path.startswith('/searches') %}active{% endif %}">搜索缓存</a>
+  </nav>
+  <span style="margin-left:auto;color:#959da5;font-size:12px;">{{ library_root }}</span>
+</header>
+<main>
+  {% if not library_enabled %}
+  <div class="banner error">
+    <strong>本地库未启用：</strong> {{ library_disabled_reason or "未知原因" }}
+  </div>
+  {% endif %}
+  {% block content %}{% endblock %}
+</main>
+</body>
+</html>

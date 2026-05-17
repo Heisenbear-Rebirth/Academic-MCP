@@ -477,6 +477,117 @@ class Library:
                     ),
                 )
 
+    # -- Listing / management (for the web UI) -----------------------
+
+    def stats(self) -> Dict[str, Any]:
+        if not self.enabled:
+            return {"enabled": False, "platforms": [], "totals": {"papers": 0, "searches": 0}}
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT platform, COUNT(*) AS c, "
+                    "SUM(CASE WHEN pdf_path IS NOT NULL AND pdf_path<>'' THEN 1 ELSE 0 END) AS pdfs, "
+                    "SUM(CASE WHEN md_path IS NOT NULL AND md_path<>'' THEN 1 ELSE 0 END) AS mds "
+                    "FROM papers GROUP BY platform ORDER BY c DESC"
+                )
+                platforms = [dict(r) for r in cur.fetchall()]
+                cur.execute("SELECT COUNT(*) AS c FROM papers")
+                papers_total = cur.fetchone()["c"]
+                cur.execute("SELECT COUNT(*) AS c FROM search_queries")
+                searches_total = cur.fetchone()["c"]
+        return {
+            "enabled": True,
+            "platforms": platforms,
+            "totals": {"papers": papers_total, "searches": searches_total},
+        }
+
+    def list_papers(
+        self,
+        platform: Optional[str] = None,
+        keyword: Optional[str] = None,
+        page: int = 1,
+        page_size: int = 30,
+    ) -> Dict[str, Any]:
+        if not self.enabled:
+            return {"rows": [], "total": 0, "page": page, "page_size": page_size}
+        where, params = [], []
+        if platform:
+            where.append("platform=%s")
+            params.append(platform.upper())
+        if keyword:
+            where.append("(title LIKE %s OR author LIKE %s OR native_id LIKE %s)")
+            like = f"%{keyword}%"
+            params.extend([like, like, like])
+        clause = ("WHERE " + " AND ".join(where)) if where else ""
+        offset = max(0, (page - 1) * page_size)
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(f"SELECT COUNT(*) AS c FROM papers {clause}", params)
+                total = cur.fetchone()["c"]
+                cur.execute(
+                    f"SELECT id, platform, native_id, title, author, pub_date, db_type, "
+                    f"pdf_path, md_path, detail_link, updated_at FROM papers {clause} "
+                    f"ORDER BY updated_at DESC LIMIT %s OFFSET %s",
+                    [*params, page_size, offset],
+                )
+                rows = [dict(r) for r in cur.fetchall()]
+        return {"rows": rows, "total": total, "page": page, "page_size": page_size}
+
+    def list_searches(self, page: int = 1, page_size: int = 30) -> Dict[str, Any]:
+        if not self.enabled:
+            return {"rows": [], "total": 0, "page": page, "page_size": page_size}
+        offset = max(0, (page - 1) * page_size)
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT COUNT(*) AS c FROM search_queries")
+                total = cur.fetchone()["c"]
+                cur.execute(
+                    "SELECT id, platform, query_hash, query_text, filters, total_results, fetched_at "
+                    "FROM search_queries ORDER BY fetched_at DESC LIMIT %s OFFSET %s",
+                    (page_size, offset),
+                )
+                rows = []
+                for r in cur.fetchall():
+                    row = dict(r)
+                    filters = row.get("filters")
+                    if isinstance(filters, (bytes, bytearray)):
+                        filters = filters.decode("utf-8", errors="replace")
+                    if isinstance(filters, str):
+                        try:
+                            row["filters"] = json.loads(filters)
+                        except Exception:
+                            pass
+                    rows.append(row)
+        return {"rows": rows, "total": total, "page": page, "page_size": page_size}
+
+    def delete_paper(self, platform: str, native_id: str, *, remove_files: bool = False) -> bool:
+        if not self.enabled or not native_id:
+            return False
+        paper = self.get_paper(platform, native_id) or {}
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "DELETE FROM papers WHERE platform=%s AND native_id=%s",
+                    ((platform or "").upper(), native_id),
+                )
+                deleted = cur.rowcount > 0
+        if deleted and remove_files:
+            canon = self.canonical_dir(platform, native_id)
+            try:
+                if canon.exists():
+                    shutil.rmtree(canon)
+            except Exception as e:
+                print(f"[Library] Failed to remove files for {platform}/{native_id}: {e}")
+        return deleted
+
+    def delete_search(self, search_id: int) -> bool:
+        if not self.enabled:
+            return False
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM search_queries WHERE id=%s", (int(search_id),))
+                return cur.rowcount > 0
+
     # -- High-level helpers (async-friendly) --------------------------
 
     async def search_or_fetch(

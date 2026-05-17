@@ -1,0 +1,136 @@
+:root {
+  --bg: #f6f8fa;
+  --card: #ffffff;
+  --border: #e1e4e8;
+  --muted: #6a737d;
+  --text: #24292e;
+  --accent: #0366d6;
+  --danger: #d73a49;
+  --ok: #2ea44f;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+    "Microsoft YaHei", sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 14px;
+}
+header {
+  background: #24292e;
+  color: white;
+  padding: 12px 24px;
+  display: flex;
+  align-items: center;
+  gap: 20px;
+}
+header h1 { margin: 0; font-size: 16px; font-weight: 600; }
+header nav a {
+  color: #d1d5da;
+  text-decoration: none;
+  padding: 6px 10px;
+  border-radius: 4px;
+}
+header nav a:hover { background: rgba(255,255,255,0.08); color: white; }
+header nav a.active { color: white; background: rgba(255,255,255,0.12); }
+main { padding: 24px; max-width: 1200px; margin: 0 auto; }
+.banner {
+  padding: 12px 16px;
+  background: #fff5b1;
+  border: 1px solid #d9d472;
+  border-radius: 6px;
+  margin-bottom: 16px;
+}
+.banner.error { background: #ffeef0; border-color: #f9d0d4; color: #cb2431; }
+.card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 16px;
+  margin-bottom: 16px;
+}
+h2 { margin: 0 0 12px; font-size: 18px; }
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 12px;
+}
+.stat-box {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 14px;
+  text-align: center;
+}
+.stat-box .num { font-size: 24px; font-weight: 600; color: var(--accent); }
+.stat-box .label { color: var(--muted); margin-top: 4px; font-size: 12px; }
+table { width: 100%; border-collapse: collapse; }
+th, td {
+  border-bottom: 1px solid var(--border);
+  padding: 8px 10px;
+  text-align: left;
+  vertical-align: top;
+}
+th { background: #fafbfc; color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase; }
+td.title-cell { max-width: 380px; overflow: hidden; text-overflow: ellipsis; }
+td.title-cell a { color: var(--accent); text-decoration: none; }
+td.title-cell a:hover { text-decoration: underline; }
+.muted { color: var(--muted); font-size: 12px; }
+.pill {
+  display: inline-block;
+  padding: 2px 8px;
+  background: #eef2f6;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text);
+}
+.pill.platform { background: #e1ecf4; color: #0c5176; }
+.pill.has-file { background: #dcffe4; color: #1a7f37; }
+.pill.no-file { background: #f3f4f6; color: #6a737d; }
+form.filter { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 12px; }
+input, select {
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 13px;
+  font-family: inherit;
+  background: white;
+}
+button, .btn {
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  background: white;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 13px;
+  font-family: inherit;
+  color: var(--text);
+  text-decoration: none;
+  display: inline-block;
+}
+button:hover, .btn:hover { background: #f3f4f6; }
+button.primary { background: var(--accent); color: white; border-color: var(--accent); }
+button.primary:hover { background: #0254ad; }
+button.danger { background: var(--danger); color: white; border-color: var(--danger); }
+button.danger:hover { background: #b32839; }
+.pagination { margin-top: 16px; display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.pagination .page-info { color: var(--muted); }
+.kv { display: grid; grid-template-columns: 140px 1fr; gap: 6px 12px; }
+.kv .k { color: var(--muted); }
+.kv .v { word-break: break-all; }
+pre.abstract {
+  background: #f6f8fa;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 12px;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  margin: 0;
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.6;
+}
+.actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+.checkbox { display: inline-flex; gap: 6px; align-items: center; font-size: 13px; }
