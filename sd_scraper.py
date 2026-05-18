@@ -251,6 +251,14 @@ class ScienceDirectScraper:
             venue_loc = item.locator("span.srctitle-date-fields a.subtype-srctitle-link").first
             venue_name = (await venue_loc.inner_text()).strip() if await venue_loc.count() > 0 else ""
 
+            # journal filter post-check: SD's &pub= URL param is fuzzy, drop cross-publication
+            # hits when caller wanted a specific journal.
+            if journal and venue_name:
+                target = journal.strip().lower()
+                vn = venue_name.lower()
+                if target and target not in vn and vn not in target:
+                    continue
+
             # Date sits as the second direct child <span> of .srctitle-date-fields (e.g. "March 2025").
             date_loc = item.locator("span.srctitle-date-fields > span").nth(1)
             if await date_loc.count() == 0:

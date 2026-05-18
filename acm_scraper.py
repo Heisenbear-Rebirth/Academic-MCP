@@ -177,7 +177,21 @@ class ACMScraper:
         }
         field = field_map.get(search_field, search_field if search_field in ["AllField", "Title", "Abstract", "Author"] else "AllField")
         
-        q_url = f"https://dl.acm.org/action/doSearch?{field}={urllib.parse.quote_plus(query)}&startPage={start_page}&pageSize={page_size}"
+        # ACM Digital Library accepts publication-name filtering via the AllField query using
+        # the indexed field "PubName" (or "SeriesId" for proceedings series). The most reliable
+        # cross-content-type filter is to AND PubName with the user query.
+        journal_clean = (journal or "").strip()
+        if journal_clean:
+            quoted_journal = journal_clean.replace('"', '\\"')
+            combined_q = f'"{quoted_journal}" AND ({query})'
+        else:
+            combined_q = query
+
+        q_url = f"https://dl.acm.org/action/doSearch?{field}={urllib.parse.quote_plus(combined_q)}&startPage={start_page}&pageSize={page_size}"
+        if journal_clean:
+            # ACM also exposes a dedicated SeriesKey/PubName facet on the search URL. Appending
+            # both narrows the result set further when the AllField AND does not match strictly.
+            q_url += f"&PubName={urllib.parse.quote_plus(journal_clean)}"
         if source_type.lower() not in ["all", "全部", ""]:
             # Example param passing in ACM for filter
             # Although ACM usually adds something like &ConceptID= or filters via POST,
@@ -300,6 +314,14 @@ class ACMScraper:
             # Venue (journal / proceedings name) sits in the meta-line of the item card.
             venue_tag = item.select_one(".issue-item__detail a, .epub-section__title")
             venue_name = venue_tag.text.strip() if venue_tag else ""
+
+            # Belt and suspenders: even with PubName + AllField filter, ACM occasionally returns
+            # cross-publication hits when the journal token appears in body text. Drop them.
+            if journal_clean and venue_name:
+                vn = venue_name.lower()
+                jc = journal_clean.lower()
+                if jc not in vn and vn not in jc:
+                    continue
 
             uid = hashlib.md5(link.encode()).hexdigest()[:8]
 

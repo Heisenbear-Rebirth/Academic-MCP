@@ -474,10 +474,14 @@ class CNKIScraper:
                     
                 author_elem = row.select_one("td.author")
                 author = self._clean_result_text(author_elem.text if author_elem else "N/A", compact=True)
-                
+
                 source_elem = row.select_one("td.source")
                 source = self._clean_result_text(source_elem.text if source_elem else "N/A", compact=True)
-                
+                # On CNKI's result table, td.source already holds the journal / publication
+                # name in clear text, so it doubles as venue_name. We expose it under both keys
+                # for cross-platform consistency.
+                venue_name = source if source != "N/A" else ""
+
                 date_elem = row.select_one("td.date")
                 date = self._clean_result_text(date_elem.text if date_elem else "N/A")
 
@@ -488,20 +492,30 @@ class CNKIScraper:
                 if year_filter_active and matched_for_offset < start_index:
                     matched_for_offset += 1
                     continue
-                 
+
+                # journal filter: CNKI's UI facet for 文献来源 is hidden behind a JS-only panel
+                # that is fragile to drive; doing a client-side substring match against the
+                # already-extracted source column is both reliable and order-preserving.
+                if journal and venue_name:
+                    target = journal.strip().lower()
+                    vn = venue_name.lower()
+                    if target and target not in vn and vn not in target:
+                        continue
+
                 data_elem = row.select_one("td.data")
                 db_type = data_elem.text.strip() if data_elem else "N/A"
-                 
+
                 uid = hashlib.md5(detail_link.encode()).hexdigest()[:8]
-                 
+
                 results.append({
                     "id": uid,
                     "title": title,
                     "author": author,
                     "source": source,
+                    "venue_name": venue_name,
                     "date": date,
                     "db_type": db_type,
-                    "detail_link": detail_link
+                    "detail_link": detail_link,
                 })
                 collected += 1
                 if year_filter_active:

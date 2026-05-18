@@ -180,35 +180,47 @@ class GoogleScholarScraper:
             author = "N/A"
             date = "N/A"
             source = "Google Scholar"
-            
+            venue_name = ""
+
             if " - " in author_pub_str:
                 parts = author_pub_str.split(" - ")
                 author = parts[0]
                 if len(parts) > 1:
-                    date_m = re.search(r'\b(19|20)\d{2}\b', parts[1])
+                    middle = parts[1]
+                    date_m = re.search(r'\b(19|20)\d{2}\b', middle)
                     if date_m:
                         date = date_m.group()
+                    # Strip the year and trailing comma to leave just the venue/journal token.
+                    venue_name = re.sub(r',?\s*\b(19|20)\d{2}\b.*$', '', middle).strip().rstrip(',').strip()
                     source = parts[-1].strip()
                     if source.startswith("…"):
                         source_guess = urllib.parse.urlparse(detail_link).netloc
                         source = source_guess if source_guess else source
             else:
                 author = author_pub_str
-                
+
+            # Belt and suspenders on top of GS's &as_publication=, which is fuzzy.
+            if journal and venue_name:
+                target = journal.strip().lower()
+                vn = venue_name.lower()
+                if target and target not in vn and vn not in target:
+                    continue
+
             snippet_elem = row.select_one("div.gs_rs")
             snippet = snippet_elem.text.replace('\n', ' ').strip() if snippet_elem else ""
-            
+
             uid = hashlib.md5(detail_link.encode()).hexdigest()[:8]
-            
+
             results.append({
                 "id": uid,
                 "title": title,
                 "author": author,
                 "source": "GS: " + source,
+                "venue_name": venue_name,
                 "date": date,
                 "db_type": "GS Aggregated",
                 "detail_link": detail_link,
-                "_gs_snippet": snippet
+                "_gs_snippet": snippet,
             })
             collected += 1
             
