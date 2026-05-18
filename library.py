@@ -236,6 +236,7 @@ class Library:
                         title TEXT,
                         author TEXT,
                         source TEXT,
+                        venue_name VARCHAR(512),
                         pub_date VARCHAR(64),
                         db_type VARCHAR(64),
                         doi VARCHAR(255),
@@ -252,6 +253,12 @@ class Library:
                     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
                     """
                 )
+                # Defensive migration for installations that pre-date the venue_name column.
+                try:
+                    cur.execute("ALTER TABLE papers ADD COLUMN venue_name VARCHAR(512) AFTER source")
+                except pymysql.err.OperationalError as e:
+                    if e.args[0] != 1060:  # 1060 = Duplicate column name (already migrated)
+                        raise
                 cur.execute(
                     """
                     CREATE TABLE IF NOT EXISTS search_queries (
@@ -384,7 +391,7 @@ class Library:
         return self._row_to_paper(row) if row else None
 
     _PAPER_COLS = (
-        "title", "author", "source", "pub_date", "db_type", "doi",
+        "title", "author", "source", "venue_name", "pub_date", "db_type", "doi",
         "detail_link", "abstract", "keywords", "pdf_path", "md_path",
         "images_dir", "extra",
     )
@@ -632,8 +639,10 @@ class Library:
                     title=paper.get("title"),
                     author=paper.get("author"),
                     source=paper.get("source"),
+                    venue_name=paper.get("venue_name"),
                     pub_date=paper.get("date"),
                     db_type=paper.get("db_type"),
+                    doi=paper.get("doi"),
                     detail_link=paper.get("detail_link"),
                     abstract=paper.get("_abstract"),
                 )

@@ -245,26 +245,33 @@ class ScienceDirectScraper:
             author_locs = await item.locator(".author").all()
             author_str = ", ".join([await a.inner_text() for a in author_locs]) if author_locs else "N/A"
             
+            # Venue name lives in the first span of .srctitle-date-fields (e.g.
+            # "Computers & Industrial Engineering"); the second span is the date.
+            venue_loc = item.locator(".srctitle-date-fields span:nth-of-type(1)")
+            venue_name = await venue_loc.inner_text() if await venue_loc.count() > 0 else ""
+            venue_name = venue_name.strip()
+
             date_loc = item.locator(".srctitle-date-fields span:nth-of-type(2)")
             if await date_loc.count() == 0:
                 date_loc = item.locator(".srctitle-date-fields span:last-child")
             date = await date_loc.inner_text() if await date_loc.count() > 0 else "N/A"
-            
+
             doc_type = "Article"
             type_loc = item.locator(".article-type")
             if await type_loc.count() > 0:
                 doc_type = await type_loc.inner_text()
-            
+
             uid = hashlib.md5(link.encode()).hexdigest()[:8]
-            
+
             papers.append({
                 "id": uid,
                 "title": title.strip(),
                 "author": author_str.strip(),
-                "source": "ScienceDirect",
+                "source": venue_name or "ScienceDirect",
+                "venue_name": venue_name,
                 "date": date.strip(),
                 "db_type": doc_type.strip(),
-                "detail_link": link
+                "detail_link": link,
             })
             collected += 1
             
@@ -386,6 +393,9 @@ class ScienceDirectScraper:
             safe_name = pii_match.group(1) if pii_match else "unknown_pii"
             file_path = os.path.join(output_dir, f"sd_{safe_name}.pdf")
 
+            direct_status = None
+            direct_type = ""
+            direct_size = 0
             try:
                 direct_response = await self.context.request.get(
                     pdf_url,
@@ -393,15 +403,25 @@ class ScienceDirectScraper:
                     timeout=60000,
                 )
                 direct_body = await direct_response.body()
+                direct_status = direct_response.status
                 direct_type = direct_response.headers.get("content-type", "").lower()
-                if direct_response.status == 200 and (
+                direct_size = len(direct_body)
+                if direct_status == 200 and (
                     direct_body.startswith(b"%PDF") or "application/pdf" in direct_type
                 ):
                     with open(file_path, "wb") as f:
                         f.write(direct_body)
                     return file_path
+                # Silent DataDome: 200 with text/html body, or 403 from the asset host.
+                if b"datadome" in direct_body[:4096].lower() or b"are you a robot" in direct_body[:4096].lower():
+                    return (
+                        "Error: ScienceDirect served a DataDome challenge for the PDF stream "
+                        f"(direct request returned HTTP {direct_status}, {direct_size} bytes of "
+                        f"content-type {direct_type or 'unknown'}). Re-run with manual verification "
+                        f"enabled. PDF URL: {pdf_url}"
+                    )
                 print(
-                    f"SD direct PDF request did not return a PDF: status={direct_response.status}, content-type={direct_type}"
+                    f"SD direct PDF request did not return a PDF: status={direct_status}, content-type={direct_type}, body={direct_size}B"
                 )
             except Exception as e:
                 print(f"SD direct PDF request failed, falling back to viewer flow: {e}")
@@ -495,7 +515,7 @@ class ScienceDirectScraper:
                     except Exception as e:
                         print("Native download event failed:", e)
                     break
-                    
+
                 # 2. Intercepted PDF bytes from navigation?
                 if len(pdf_body) > 0:
                     with open(file_path, "wb") as f:
@@ -503,16 +523,47 @@ class ScienceDirectScraper:
                     is_downloaded = True
                     download_event_task.cancel()
                     break
-                    
+
                 await asyncio.sleep(1)
-                
+
             self.page.remove_listener("response", handle_response)
-            
+
             if not download_event_task.done():
                 download_event_task.cancel()
-                
+
             if not is_downloaded:
-                return "Error: Timed out (60s) waiting for PDF download or stream navigation."
+                # Build a self-explanatory error so the caller can tell apart
+                # silent CAPTCHA / asset 403 / no-download-button on the EPDF viewer.
+                try:
+                    viewer_title = await self.page.title()
+                except Exception:
+                    viewer_title = "(title unavailable)"
+                try:
+                    viewer_html = await self.page.content()
+                except Exception:
+                    viewer_html = ""
+                viewer_url = self.page.url
+                silent_block = any(
+                    marker in (viewer_html or "").lower()
+                    for marker in ("datadome", "are you a robot", "captcha-delivery", "geo.captcha")
+                )
+                reason = (
+                    "DataDome silently blocked the EPDF viewer (no native captcha banner but the "
+                    "PDF stream never fired)."
+                    if silent_block
+                    else "EPDF viewer loaded but the download button did not produce a download event "
+                         "(possibly a missing entitlement or layout change)."
+                )
+                return (
+                    f"Error: SD PDF download timed out after 60s.\n"
+                    f"Reason: {reason}\n"
+                    f"Viewer URL: {viewer_url}\n"
+                    f"Viewer title: {viewer_title}\n"
+                    f"Direct PDF asset request: status={direct_status}, content-type={direct_type or '?'}, size={direct_size}B\n"
+                    f"Signed PDF URL: {pdf_url}\n"
+                    f"Hint: rerun with allow_headful_fallback enabled, solve the CAPTCHA in the headful window, "
+                    f"and retry. If the asset returned a 403/empty body, your cf_clearance / DataDome cookie has expired."
+                )
             
             # Additional check
             if os.path.exists(file_path):

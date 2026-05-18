@@ -69,16 +69,24 @@ class IEEEScraper:
     async def search_papers(self, query: str, search_field: str = "All", db_scope: str = "", source_type: str = "all", journal: str = None, start_year: int = None, end_year: int = None, sort_by: str = "relevance", start_index: int = 0, limit: int = 10) -> Dict:
         if not self.page:
             await self.initialize()
-            
+
         import urllib.parse
-        encoded_query = urllib.parse.quote(query)
-        
+        # IEEE Xplore advanced-query syntax: ("Publication Title":"...") forces results
+        # to a single journal. Without this, the journal argument was silently ignored.
+        journal_clean = (journal or "").strip()
+        if journal_clean:
+            quoted = journal_clean.replace('"', '\\"')
+            search_query = f'("Publication Title":"{quoted}") AND ({query})'
+        else:
+            search_query = query
+        encoded_query = urllib.parse.quote(search_query)
+
         sort_str = ""
         if sort_by == "citations":
             sort_str = "&sortType=paper-citations"
         elif sort_by == "date_desc":
             sort_str = "&sortType=newest"
-            
+
         range_str = ""
         if start_year and end_year:
             range_str = f"&ranges={start_year}_{end_year}_Year"
@@ -86,7 +94,7 @@ class IEEEScraper:
             range_str = f"&ranges={start_year}_2026_Year"
         elif end_year:
             range_str = f"&ranges=1900_{end_year}_Year"
-            
+
         base_url = f"https://ieeexplore.ieee.org/search/searchresult.jsp?newsearch=true&queryText={encoded_query}{sort_str}{range_str}"
         
         await self.page.goto(base_url, wait_until="networkidle")
@@ -193,35 +201,57 @@ class IEEEScraper:
                 author_elem = row.select_one(".author, p.author")
                 author = author_elem.text.strip() if author_elem else "N/A"
                 author = author.replace("\n", "").replace("  ", "")
-                
-                # Try finding publisher info
-                publisher_elem = row.select_one("div.publisher-info-container, span:-soup-contains('Publisher:')")
-                source = publisher_elem.text.strip() if publisher_elem else "IEEE"
-                
+
+                # Venue link lives directly inside div.description (the first <a> before the
+                # nested publisher-info-container). Journals point at /xpl/RecentIssue.jsp?punumber=
+                # while conferences point at /xpl/conhome/<id>/proceeding.
+                description = row.select_one("div.description")
+                venue_name = ""
+                if description:
+                    venue_link = description.find(
+                        "a",
+                        href=lambda h: h and ("/xpl/RecentIssue" in h or "/xpl/conhome" in h or "punumber=" in h),
+                    )
+                    if venue_link and venue_link.text.strip():
+                        venue_name = venue_link.text.strip()
+                publisher_container = row.select_one("div.publisher-info-container")
+
+                # Belt and suspenders: if the caller asked for a specific journal but IEEE returned
+                # a paper from a different venue (it happens when the query syntax falls back to
+                # full-text matching), skip it client-side.
+                if journal_clean and venue_name:
+                    venue_norm = venue_name.lower()
+                    target_norm = journal_clean.lower()
+                    if target_norm not in venue_norm and venue_norm not in target_norm:
+                        continue
+
+                source = publisher_container.text.strip() if publisher_container else "IEEE"
+
                 # Year info
-                year_elem = text_elem = row.select_one("div.description, div.publisher-info-container")
+                year_elem = row.select_one("div.description, div.publisher-info-container")
                 date = "N/A"
                 if year_elem:
                     y_match = re.search(r'Year:\s*(\d{4})', year_elem.text)
                     if y_match:
                         date = y_match.group(1)
-                
+
                 db_type = "N/A"
                 if year_elem:
                     t_match = re.search(r'\|\s*([^|]+)$', year_elem.text)
                     if t_match:
                         db_type = t_match.group(1).strip()
-                        
+
                 uid = hashlib.md5(detail_link.encode()).hexdigest()[:8]
-                
+
                 results.append({
                     "id": uid,
                     "title": title,
                     "author": author,
                     "source": source,
+                    "venue_name": venue_name,
                     "date": date,
                     "db_type": db_type,
-                    "detail_link": detail_link
+                    "detail_link": detail_link,
                 })
                 collected += 1
                 

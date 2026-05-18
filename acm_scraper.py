@@ -276,32 +276,43 @@ class ACMScraper:
             title_tag = item.select_one("h5.issue-item__title a, h2.issue-item__title a, .hlFld-Title a")
             title = title_tag.text.strip() if title_tag else "N/A"
             link = "https://dl.acm.org" + title_tag['href'] if title_tag and title_tag.has_attr('href') else ""
-            
+
             authors_tags = item.select(".author-name")
             authors = [a.text.strip() for a in authors_tags] if authors_tags else []
             author_str = ", ".join(authors) if authors else "N/A"
-            
+
             item_text = item.get_text(" ", strip=True)
             year_match = re.search(r"\b(?:19|20)\d{2}\b", item_text)
             date_tag = item.select_one(".dot-separator span")
             date = year_match.group(0) if year_match else (date_tag.text.strip() if date_tag else "N/A")
             if date.lower().startswith("pages"):
                 date = "N/A"
-            
+
             # Content Type
             type_tag = item.select_one(".issue-heading")
             doc_type = type_tag.text.strip() if type_tag else "Article"
-            
+
+            # ACM detail URLs always carry the DOI (/doi/10.xxxx/yyyy). Surface it so callers
+            # can disambiguate venues / dedupe against other platforms without an extra fetch.
+            doi_match = re.search(r'/doi/(?:abs/|full/|pdf/)?(10\.[^/?#]+/[^/?#]+)', link)
+            doi = doi_match.group(1) if doi_match else ""
+
+            # Venue (journal / proceedings name) sits in the meta-line of the item card.
+            venue_tag = item.select_one(".issue-item__detail a, .epub-section__title")
+            venue_name = venue_tag.text.strip() if venue_tag else ""
+
             uid = hashlib.md5(link.encode()).hexdigest()[:8]
-            
+
             papers.append({
                 "id": uid,
                 "title": title,
                 "author": author_str,
-                "source": "ACM Digital Library",
+                "source": venue_name or "ACM Digital Library",
+                "venue_name": venue_name,
+                "doi": doi,
                 "date": date,
                 "db_type": doc_type,
-                "detail_link": link
+                "detail_link": link,
             })
             collected += 1
             

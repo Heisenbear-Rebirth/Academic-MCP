@@ -9,7 +9,8 @@
     <div class="k">平台</div><div class="v"><span class="pill platform">{{ paper.platform }}</span></div>
     <div class="k">native_id</div><div class="v"><code>{{ paper.native_id }}</code></div>
     <div class="k">作者</div><div class="v">{{ paper.author or "—" }}</div>
-    <div class="k">来源</div><div class="v">{{ paper.source or "—" }}</div>
+    <div class="k">期刊/会议</div><div class="v">{{ paper.venue_name or "—" }}</div>
+    <div class="k">原始来源串</div><div class="v">{{ paper.source or "—" }}</div>
     <div class="k">发表日期</div><div class="v">{{ paper.pub_date or "—" }}</div>
     <div class="k">类型</div><div class="v">{{ paper.db_type or "—" }}</div>
     <div class="k">DOI</div><div class="v">{{ paper.doi or "—" }}</div>
