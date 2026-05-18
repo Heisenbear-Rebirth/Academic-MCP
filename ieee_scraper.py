@@ -216,14 +216,13 @@ class IEEEScraper:
                         venue_name = venue_link.text.strip()
                 publisher_container = row.select_one("div.publisher-info-container")
 
-                # Belt and suspenders: if the caller asked for a specific journal but IEEE returned
-                # a paper from a different venue (it happens when the query syntax falls back to
-                # full-text matching), skip it client-side.
-                if journal_clean and venue_name:
-                    venue_norm = venue_name.lower()
-                    target_norm = journal_clean.lower()
-                    if target_norm not in venue_norm and venue_norm not in target_norm:
-                        continue
+                # Belt and suspenders: if the caller asked for a specific journal but IEEE
+                # returned a paper from a different venue (happens when the query syntax falls
+                # back to full-text matching), skip it client-side. venue_matches handles
+                # punctuation / parenthetical noise like "Conference Paper" suffixes.
+                from scraper_utils import venue_matches
+                if journal_clean and venue_name and not venue_matches(journal_clean, venue_name):
+                    continue
 
                 source = publisher_container.text.strip() if publisher_container else "IEEE"
 
@@ -274,8 +273,9 @@ class IEEEScraper:
     async def get_paper_details(self, detail_url: str) -> Dict[str, str]:
         if not self.page:
             await self.initialize()
-            
-        await self.page.goto(detail_url, wait_until="networkidle")
+
+        from scraper_utils import goto_with_retry
+        await goto_with_retry(self.page, detail_url, wait_until="networkidle")
         await asyncio.sleep(2)
         
         try:

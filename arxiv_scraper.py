@@ -146,7 +146,8 @@ class ArxivScraper:
         
         try:
             await self.initialize()
-            await self.page.goto(detail_url, wait_until="domcontentloaded")
+            from scraper_utils import goto_with_retry
+            await goto_with_retry(self.page, detail_url, wait_until="domcontentloaded")
             await asyncio.sleep(2)
             html = await self.page.content()
             soup = bs4.BeautifulSoup(html, "html.parser")

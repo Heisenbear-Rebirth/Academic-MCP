@@ -346,13 +346,11 @@ class ACMScraper:
             venue_tag = item.select_one(".issue-item__detail a, .epub-section__title")
             venue_name = venue_tag.text.strip() if venue_tag else ""
 
-            # Belt and suspenders: even with PubName + AllField filter, ACM occasionally returns
-            # cross-publication hits when the journal token appears in body text. Drop them.
-            if journal_clean and venue_name:
-                vn = venue_name.lower()
-                jc = journal_clean.lower()
-                if jc not in vn and vn not in jc:
-                    continue
+            # Belt and suspenders: even with PubName + AllField filter, ACM occasionally
+            # returns cross-publication hits when the journal token appears in body text.
+            from scraper_utils import venue_matches
+            if journal_clean and venue_name and not venue_matches(journal_clean, venue_name):
+                continue
 
             uid = hashlib.md5(link.encode()).hexdigest()[:8]
 
@@ -376,7 +374,8 @@ class ACMScraper:
 
     async def get_paper_details(self, detail_url: str) -> Dict[str, str]:
         await self._ensure_browser()
-        await self.page.goto(detail_url, wait_until="domcontentloaded")
+        from scraper_utils import goto_with_retry
+        await goto_with_retry(self.page, detail_url, wait_until="domcontentloaded")
         
         # Smart wait for Cloudflare
         for _ in range(15):

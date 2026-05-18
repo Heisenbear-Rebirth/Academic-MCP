@@ -251,8 +251,9 @@ class PatyeeScraper:
     async def get_paper_details(self, url: str) -> Dict:
         await self._ensure_browser()
         print(f"[Patyee] Fetching details for {url}")
-        
-        await self.page.goto(url, wait_until="domcontentloaded", timeout=60000)
+
+        from scraper_utils import goto_with_retry
+        await goto_with_retry(self.page, url, wait_until="domcontentloaded", timeout=60000)
         try:
             await self.page.wait_for_load_state("domcontentloaded", timeout=10000)
         except Exception:

@@ -496,11 +496,9 @@ class CNKIScraper:
                 # journal filter: CNKI's UI facet for 文献来源 is hidden behind a JS-only panel
                 # that is fragile to drive; doing a client-side substring match against the
                 # already-extracted source column is both reliable and order-preserving.
-                if journal and venue_name:
-                    target = journal.strip().lower()
-                    vn = venue_name.lower()
-                    if target and target not in vn and vn not in target:
-                        continue
+                from scraper_utils import venue_matches
+                if journal and venue_name and not venue_matches(journal, venue_name):
+                    continue
 
                 data_elem = row.select_one("td.data")
                 db_type = data_elem.text.strip() if data_elem else "N/A"
@@ -541,8 +539,9 @@ class CNKIScraper:
     async def get_paper_details(self, detail_url: str) -> Dict[str, str]:
         if not self.page:
             await self.initialize()
-            
-        await self.page.goto(detail_url, wait_until="domcontentloaded")
+
+        from scraper_utils import goto_with_retry
+        await goto_with_retry(self.page, detail_url, wait_until="domcontentloaded")
         
         try:
             await asyncio.sleep(2)

@@ -253,11 +253,9 @@ class ScienceDirectScraper:
 
             # journal filter post-check: SD's &pub= URL param is fuzzy, drop cross-publication
             # hits when caller wanted a specific journal.
-            if journal and venue_name:
-                target = journal.strip().lower()
-                vn = venue_name.lower()
-                if target and target not in vn and vn not in target:
-                    continue
+            from scraper_utils import venue_matches
+            if journal and venue_name and not venue_matches(journal, venue_name):
+                continue
 
             # Date sits as the second direct child <span> of .srctitle-date-fields (e.g. "March 2025").
             date_loc = item.locator("span.srctitle-date-fields > span").nth(1)
@@ -291,7 +289,8 @@ class ScienceDirectScraper:
 
     async def get_paper_details(self, detail_url: str) -> Dict[str, str]:
         await self._ensure_browser()
-        await self.page.goto(detail_url, wait_until="domcontentloaded")
+        from scraper_utils import goto_with_retry
+        await goto_with_retry(self.page, detail_url, wait_until="domcontentloaded")
         
         for _ in range(15):
             try:

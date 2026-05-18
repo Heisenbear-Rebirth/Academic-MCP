@@ -200,11 +200,11 @@ class GoogleScholarScraper:
                 author = author_pub_str
 
             # Belt and suspenders on top of GS's &as_publication=, which is fuzzy.
-            if journal and venue_name:
-                target = journal.strip().lower()
-                vn = venue_name.lower()
-                if target and target not in vn and vn not in target:
-                    continue
+            # GS routinely truncates venue names ("Advances in neural ...") -- use
+            # the shared matcher so the trailing ellipsis is forgiven.
+            from scraper_utils import venue_matches
+            if journal and venue_name and not venue_matches(journal, venue_name):
+                continue
 
             snippet_elem = row.select_one("div.gs_rs")
             snippet = snippet_elem.text.replace('\n', ' ').strip() if snippet_elem else ""
