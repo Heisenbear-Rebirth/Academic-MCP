@@ -23,7 +23,13 @@ class IEEEScraper:
         import json
         self.playwright = None # Will not be used anymore
         
-        profile_dir = os.path.abspath(".ieee_profile")
+        from runtime_config import profile_path
+        from scraper_utils import acquire_profile
+        profile_dir = profile_path(".ieee_profile")
+        # Refuse early (clean error, no blocking Firefox modal) if another live MCP
+        # server already owns this profile.
+        acquire_profile(profile_dir, "IEEE")
+        self._profile_dir = profile_dir
         # parent.lock / .parentlock are Firefox-style locks (Camoufox is Firefox-based);
         # lockfile / SingletonLock are Chromium-style. A crashed previous Camoufox session
         # leaves parent.lock behind, and the next launch silently exits if we don't clean it.
@@ -68,6 +74,10 @@ class IEEEScraper:
             await self.context.close()
             self.context = None
             self.playwright = None
+        if getattr(self, "_profile_dir", None):
+            from scraper_utils import release_profile
+            release_profile(self._profile_dir)
+            self._profile_dir = None
 
     async def search_papers(self, query: str, search_field: str = "All", db_scope: str = "", source_type: str = "all", journal: str = None, start_year: int = None, end_year: int = None, sort_by: str = "relevance", start_index: int = 0, limit: int = 10) -> Dict:
         if not self.page:

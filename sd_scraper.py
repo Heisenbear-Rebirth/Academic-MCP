@@ -25,7 +25,11 @@ class ScienceDirectScraper:
     async def _ensure_browser(self, force_headful=False):
         if not self.context:
             print(f"Initializing ScienceDirect Persistent Browser Context (Headless: {not force_headful})...")
-            profile_dir = project_path(".sd_profile")
+            from runtime_config import profile_path
+            from scraper_utils import acquire_profile
+            profile_dir = profile_path(".sd_profile")
+            acquire_profile(profile_dir, "SD")
+            self._profile_dir = profile_dir
 
             # parent.lock / .parentlock are Firefox-style locks left behind by crashed
             # Camoufox sessions; without removing them the next launch exits silently.
@@ -122,6 +126,10 @@ class ScienceDirectScraper:
         elif getattr(self, 'context', None):
             await self.context.close()
             self.context = None
+        if getattr(self, "_profile_dir", None):
+            from scraper_utils import release_profile
+            release_profile(self._profile_dir)
+            self._profile_dir = None
 
     async def search_papers(self, query: str, search_field: str = "qs", db_scope: str = "", source_type: str = "all", journal: str = None, start_year: int = None, end_year: int = None, sort_by: str = "relevance", start_index: int = 0, limit: int = 10) -> Dict:
         await self._ensure_browser()

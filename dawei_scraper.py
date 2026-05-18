@@ -34,7 +34,8 @@ class DaweiScraper:
         self.playwright = None
         self.context = None
         self.page = None
-        self.profile_dir = project_path(".dawei_profile")
+        from runtime_config import profile_path
+        self.profile_dir = profile_path(".dawei_profile")
 
     async def initialize(self, force_headful: bool = False):
         await self._ensure_browser(force_headful=force_headful)
@@ -44,6 +45,8 @@ class DaweiScraper:
             return
 
         os.makedirs(self.profile_dir, exist_ok=True)
+        from scraper_utils import acquire_profile
+        acquire_profile(self.profile_dir, "DAWEI")
         # Firefox-style parent.lock cleanup for Camoufox crashes.
         for lock_name in ["lockfile", "SingletonLock", "parent.lock", ".parentlock"]:
             lock_path = os.path.join(self.profile_dir, lock_name)
@@ -77,6 +80,8 @@ class DaweiScraper:
         if self.playwright:
             await self.playwright.stop()
             self.playwright = None
+        from scraper_utils import release_profile
+        release_profile(self.profile_dir)
 
     @staticmethod
     def _strip_html(value) -> str:

@@ -103,8 +103,12 @@ class PatyeeScraper:
     async def _ensure_browser(self, force_headful=False):
         if not self.context:
             print(f"Initializing Patyee Persistent Browser Context (Headless: {not force_headful})...")
-            profile_dir = project_path(".patyee_profile")
-            
+            from runtime_config import profile_path
+            from scraper_utils import acquire_profile
+            profile_dir = profile_path(".patyee_profile")
+            acquire_profile(profile_dir, "PATYEE")
+            self._profile_dir = profile_dir
+
             # Firefox-style parent.lock cleanup for Camoufox crashes.
             for lock_name in ["lockfile", "SingletonLock", "parent.lock", ".parentlock"]:
                 lfile = os.path.join(profile_dir, lock_name)
@@ -400,6 +404,10 @@ class PatyeeScraper:
             if self.playwright:
                 await self.playwright.stop()
                 self.playwright = None
+            if getattr(self, "_profile_dir", None):
+                from scraper_utils import release_profile
+                release_profile(self._profile_dir)
+                self._profile_dir = None
             print("Patyee Context closed cleanly.")
         except Exception as e:
             print(f"Error closing Patyee context: {e}")

@@ -18,7 +18,8 @@ class CNKIScraper:
         self.context = None
         self.page = None
         self.is_headful = False
-        self.profile_dir = os.path.abspath(".cnki_profile")
+        from runtime_config import profile_path
+        self.profile_dir = profile_path(".cnki_profile")
         self.storage_state_path = os.path.abspath(os.environ.get("CNKI_STORAGE_STATE", ".cnki_storage_state.json"))
 
     def _log(self, *parts) -> None:
@@ -33,6 +34,8 @@ class CNKIScraper:
 
         self.is_headful = force_headful
         os.makedirs(self.profile_dir, exist_ok=True)
+        from scraper_utils import acquire_profile
+        acquire_profile(self.profile_dir, "CNKI")
         # Firefox-style parent.lock cleanup for Camoufox crashes.
         for lock_name in ["lockfile", "SingletonLock", "parent.lock", ".parentlock"]:
             lock_path = os.path.join(self.profile_dir, lock_name)
@@ -84,6 +87,8 @@ class CNKIScraper:
         if self.playwright:
             await self.playwright.stop()
             self.playwright = None
+        from scraper_utils import release_profile
+        release_profile(self.profile_dir)
 
     async def _goto(self, url: str, wait_until: str = "domcontentloaded", timeout: int = 45000):
         return await self.page.goto(url, wait_until=wait_until, timeout=timeout)

@@ -6,12 +6,107 @@ self-contained so individual scrapers can adopt them piecemeal.
 from __future__ import annotations
 
 import asyncio
+import os
 import re
-from typing import Any, Iterable
+from typing import Any, Iterable, Optional
 
 from mcp_logging import safe_stderr_print
 
 _print = safe_stderr_print
+
+
+# ---------------------------------------------------------------------------
+# Per-profile single-owner guard
+# ---------------------------------------------------------------------------
+# Camoufox is Firefox-based: a profile directory can only be opened by one
+# browser process at a time. When two MCP servers (e.g. one spawned by Codex
+# and one by Claude) both try to drive the same .xxx_profile, the second
+# Firefox pops a blocking GUI modal ("Firefox is already running...") that
+# hangs the whole tool call. We front-run that by writing a PID sentinel into
+# the profile dir and refusing -- with a clear error -- when a *live* foreign
+# process already owns it. Stale sentinels (from a crashed server) are
+# detected via PID liveness and cleared automatically.
+
+class ProfileInUseError(RuntimeError):
+    pass
+
+
+_SENTINEL_NAME = ".mcp_owner"
+
+
+def _pid_alive(pid: int) -> bool:
+    if pid <= 0:
+        return False
+    if os.name == "nt":
+        import ctypes
+
+        PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+        STILL_ACTIVE = 259
+        handle = ctypes.windll.kernel32.OpenProcess(
+            PROCESS_QUERY_LIMITED_INFORMATION, False, pid
+        )
+        if not handle:
+            return False
+        try:
+            code = ctypes.c_ulong()
+            ok = ctypes.windll.kernel32.GetExitCodeProcess(handle, ctypes.byref(code))
+            if not ok:
+                return False
+            return code.value == STILL_ACTIVE
+        finally:
+            ctypes.windll.kernel32.CloseHandle(handle)
+    else:
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return False
+        except PermissionError:
+            return True
+        return True
+
+
+def acquire_profile(profile_dir: str, platform: str) -> None:
+    """Claim *profile_dir* for this process. Raises ProfileInUseError if a
+    different, still-running process already owns it."""
+    try:
+        os.makedirs(profile_dir, exist_ok=True)
+    except Exception:
+        pass
+    sentinel = os.path.join(profile_dir, _SENTINEL_NAME)
+    if os.path.exists(sentinel):
+        try:
+            owner_pid = int((open(sentinel, encoding="utf-8").read().split(":", 1)[0] or "0").strip())
+        except Exception:
+            owner_pid = 0
+        if owner_pid and owner_pid != os.getpid() and _pid_alive(owner_pid):
+            raise ProfileInUseError(
+                f"{platform} browser profile '{profile_dir}' is already in use by another "
+                f"MCP server (PID {owner_pid}). Run only one MCP client against this platform "
+                f"at a time, or give each client its own profile via the 'profile_suffix' "
+                f"setting in mcp_runtime_config.json."
+            )
+        # Stale sentinel from a crashed/exited process -- safe to take over.
+    try:
+        with open(sentinel, "w", encoding="utf-8") as fh:
+            fh.write(f"{os.getpid()}:{platform}")
+    except Exception as e:
+        _print(f"[profile-guard] could not write sentinel for {platform}: {e}")
+
+
+def release_profile(profile_dir: str) -> None:
+    """Drop this process's claim on *profile_dir* (best-effort)."""
+    sentinel = os.path.join(profile_dir, _SENTINEL_NAME)
+    try:
+        if os.path.exists(sentinel):
+            owner_pid = 0
+            try:
+                owner_pid = int((open(sentinel, encoding="utf-8").read().split(":", 1)[0] or "0").strip())
+            except Exception:
+                pass
+            if owner_pid in (0, os.getpid()):
+                os.remove(sentinel)
+    except Exception:
+        pass
 
 
 # ---------------------------------------------------------------------------

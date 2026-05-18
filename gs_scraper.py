@@ -22,7 +22,11 @@ class GoogleScholarScraper:
     async def initialize(self, force_headful=False):
         import random
         # Clean obsolete lockfiles to prevent context launch crashing
-        profile_dir = os.path.join(os.getcwd(), ".gs_profile")
+        from runtime_config import profile_path
+        from scraper_utils import acquire_profile
+        profile_dir = profile_path(".gs_profile")
+        acquire_profile(profile_dir, "GS")
+        self._profile_dir = profile_dir
         # Firefox-style parent.lock cleanup -- Camoufox crashes leave these behind.
         for lock_name in ["lockfile", "SingletonLock", "parent.lock", ".parentlock"]:
             lfile = os.path.join(profile_dir, lock_name)
@@ -56,6 +60,10 @@ class GoogleScholarScraper:
         elif getattr(self, 'context', None):
             await self.context.close()
             self.context = None
+        if getattr(self, "_profile_dir", None):
+            from scraper_utils import release_profile
+            release_profile(self._profile_dir)
+            self._profile_dir = None
 
     async def search_papers(self, query: str, search_field: str = "all", db_scope: str = "", source_type: str = "all", journal: str = None, start_year: int = None, end_year: int = None, sort_by: str = "relevance", start_index: int = 0, limit: int = 10) -> Dict:
         import random

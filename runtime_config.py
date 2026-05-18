@@ -17,6 +17,7 @@ DEFAULT_CONFIG = {
     "library_enabled": True,
     "library_web_host": "127.0.0.1",
     "library_web_port": 5577,
+    "profile_suffix": "",
 }
 
 
@@ -25,6 +26,23 @@ def project_path(value: str) -> str:
     if path.is_absolute():
         return str(path)
     return str(PROJECT_ROOT / path)
+
+
+def profile_path(base_name: str) -> str:
+    """Resolve a browser-profile directory, optionally per-client.
+
+    Two MCP servers (e.g. one spawned by Codex, one by Claude) cannot share a
+    Camoufox/Firefox profile concurrently. Set the MCP_PROFILE_SUFFIX env var
+    differently for each client (or 'profile_suffix' in mcp_runtime_config.json
+    as a shared default) so each gets its own '.ieee_profile<suffix>' etc.
+    Empty suffix preserves the original single-profile behaviour.
+    """
+    suffix = os.environ.get("MCP_PROFILE_SUFFIX")
+    if suffix is None:
+        suffix = str(load_runtime_config().get("profile_suffix") or "")
+    suffix = suffix.strip()
+    name = f"{base_name}_{suffix}" if suffix else base_name
+    return project_path(name)
 
 
 def load_runtime_config() -> dict:
