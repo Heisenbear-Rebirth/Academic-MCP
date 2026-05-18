@@ -43,7 +43,38 @@ class ACMScraper:
             ]
         )
         
+    def _context_is_alive(self) -> bool:
+        """True when self.context exists and its underlying browser is still connected.
+        A previous CF-induced timeout can leave context/page non-None but referring to a
+        torn-down browser process; subsequent calls then trip TargetClosedError."""
+        if not self.context:
+            return False
+        try:
+            browser = self.context.browser
+            if browser is not None and not browser.is_connected():
+                return False
+            page = self.page
+            if page is None or page.is_closed():
+                return False
+        except Exception:
+            return False
+        return True
+
+    async def _reset_state(self) -> None:
+        """Drop references to a wedged browser/context so the next _ensure_browser rebuilds it."""
+        try:
+            if self.camoufox_cm:
+                await self.camoufox_cm.__aexit__(None, None, None)
+        except Exception:
+            pass
+        self.camoufox_cm = None
+        self.context = None
+        self.page = None
+
     async def _ensure_browser(self, force_headful=False):
+        if self.context and not self._context_is_alive():
+            print("ACM context detected as closed; rebuilding from scratch.")
+            await self._reset_state()
         if not self.context:
             print(f"Initializing ACM Persistent Browser Context (Headless: {not force_headful})...")
             profile_dir = project_path(".acm_profile")
