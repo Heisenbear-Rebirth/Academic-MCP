@@ -27,7 +27,9 @@ class ScienceDirectScraper:
             print(f"Initializing ScienceDirect Persistent Browser Context (Headless: {not force_headful})...")
             profile_dir = project_path(".sd_profile")
 
-            for lock_name in ["lockfile", "SingletonLock"]:
+            # parent.lock / .parentlock are Firefox-style locks left behind by crashed
+            # Camoufox sessions; without removing them the next launch exits silently.
+            for lock_name in ["lockfile", "SingletonLock", "parent.lock", ".parentlock"]:
                 lfile = os.path.join(profile_dir, lock_name)
                 if os.path.exists(lfile):
                     try: os.remove(lfile)

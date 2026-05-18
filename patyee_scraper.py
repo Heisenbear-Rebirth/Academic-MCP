@@ -105,7 +105,8 @@ class PatyeeScraper:
             print(f"Initializing Patyee Persistent Browser Context (Headless: {not force_headful})...")
             profile_dir = project_path(".patyee_profile")
             
-            for lock_name in ["lockfile", "SingletonLock"]:
+            # Firefox-style parent.lock cleanup for Camoufox crashes.
+            for lock_name in ["lockfile", "SingletonLock", "parent.lock", ".parentlock"]:
                 lfile = os.path.join(profile_dir, lock_name)
                 if os.path.exists(lfile):
                     try: os.remove(lfile)

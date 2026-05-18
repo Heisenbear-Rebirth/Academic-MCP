@@ -23,7 +23,8 @@ class GoogleScholarScraper:
         import random
         # Clean obsolete lockfiles to prevent context launch crashing
         profile_dir = os.path.join(os.getcwd(), ".gs_profile")
-        for lock_name in ["lockfile", "SingletonLock"]:
+        # Firefox-style parent.lock cleanup -- Camoufox crashes leave these behind.
+        for lock_name in ["lockfile", "SingletonLock", "parent.lock", ".parentlock"]:
             lfile = os.path.join(profile_dir, lock_name)
             if os.path.exists(lfile):
                 try: os.remove(lfile)

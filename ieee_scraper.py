@@ -24,7 +24,10 @@ class IEEEScraper:
         self.playwright = None # Will not be used anymore
         
         profile_dir = os.path.abspath(".ieee_profile")
-        for lock_name in ["lockfile", "SingletonLock"]:
+        # parent.lock / .parentlock are Firefox-style locks (Camoufox is Firefox-based);
+        # lockfile / SingletonLock are Chromium-style. A crashed previous Camoufox session
+        # leaves parent.lock behind, and the next launch silently exits if we don't clean it.
+        for lock_name in ["lockfile", "SingletonLock", "parent.lock", ".parentlock"]:
             lfile = os.path.join(profile_dir, lock_name)
             if os.path.exists(lfile):
                 try: os.remove(lfile)

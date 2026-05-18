@@ -79,7 +79,9 @@ class ACMScraper:
             print(f"Initializing ACM Persistent Browser Context (Headless: {not force_headful})...")
             profile_dir = project_path(".acm_profile")
             
-            for lock_name in ["lockfile", "SingletonLock"]:
+            # Include Firefox-style parent.lock / .parentlock so a crashed prior Camoufox
+            # process can't keep us from launching.
+            for lock_name in ["lockfile", "SingletonLock", "parent.lock", ".parentlock"]:
                 lfile = os.path.join(profile_dir, lock_name)
                 if os.path.exists(lfile):
                     try: os.remove(lfile)

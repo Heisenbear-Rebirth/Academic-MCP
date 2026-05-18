@@ -33,7 +33,8 @@ class CNKIScraper:
 
         self.is_headful = force_headful
         os.makedirs(self.profile_dir, exist_ok=True)
-        for lock_name in ["lockfile", "SingletonLock"]:
+        # Firefox-style parent.lock cleanup for Camoufox crashes.
+        for lock_name in ["lockfile", "SingletonLock", "parent.lock", ".parentlock"]:
             lock_path = os.path.join(self.profile_dir, lock_name)
             if os.path.exists(lock_path):
                 try:
