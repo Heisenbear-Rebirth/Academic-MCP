@@ -245,15 +245,16 @@ class ScienceDirectScraper:
             author_locs = await item.locator(".author").all()
             author_str = ", ".join([await a.inner_text() for a in author_locs]) if author_locs else "N/A"
             
-            # Venue name lives in the first span of .srctitle-date-fields (e.g.
-            # "Computers & Industrial Engineering"); the second span is the date.
-            venue_loc = item.locator(".srctitle-date-fields span:nth-of-type(1)")
-            venue_name = await venue_loc.inner_text() if await venue_loc.count() > 0 else ""
-            venue_name = venue_name.strip()
+            # Current SD markup nests the venue title several spans deep, so a plain
+            # nth-of-type selector matches multiple elements and trips Playwright strict mode.
+            # The journal/proceeding link with class subtype-srctitle-link is unique per item.
+            venue_loc = item.locator("span.srctitle-date-fields a.subtype-srctitle-link").first
+            venue_name = (await venue_loc.inner_text()).strip() if await venue_loc.count() > 0 else ""
 
-            date_loc = item.locator(".srctitle-date-fields span:nth-of-type(2)")
+            # Date sits as the second direct child <span> of .srctitle-date-fields (e.g. "March 2025").
+            date_loc = item.locator("span.srctitle-date-fields > span").nth(1)
             if await date_loc.count() == 0:
-                date_loc = item.locator(".srctitle-date-fields span:last-child")
+                date_loc = item.locator("span.srctitle-date-fields > span").last
             date = await date_loc.inner_text() if await date_loc.count() > 0 else "N/A"
 
             doc_type = "Article"
@@ -426,10 +427,47 @@ class ScienceDirectScraper:
             except Exception as e:
                 print(f"SD direct PDF request failed, falling back to viewer flow: {e}")
             
-            # Navigate to the EPDF viewer
-            await self.page.goto(pdf_url, wait_until="domcontentloaded")
-            
-            # Check for DataDome on the EPDF page
+            # Navigate to the EPDF viewer. The /pdfft entry triggers a redirect chain that
+            # ultimately serves PDF bytes from pdf.sciencedirectassets.com (an S3 signed URL).
+            # The trick: hook expect_response BEFORE navigating so we capture the PDF body in
+            # flight -- this is more reliable than the legacy "click button, wait for download
+            # event" path because (a) the download event doesn't always fire on Firefox with
+            # pdfjs disabled and (b) the signed URL only appears in page.url after the click.
+            def is_pdf_response(resp):
+                ct = resp.headers.get("content-type", "").lower()
+                if "application/pdf" in ct:
+                    return True
+                if "sciencedirectassets.com" in resp.url and ".pdf" in resp.url:
+                    return True
+                return False
+
+            try:
+                async with self.page.expect_response(is_pdf_response, timeout=45000) as pdf_resp_info:
+                    try:
+                        await self.page.goto(pdf_url, wait_until="domcontentloaded", timeout=30000)
+                    except Exception as e:
+                        # Inline PDF responses can abort the goto with NS_BINDING_ABORTED on
+                        # Firefox. The response we want has already fired by then.
+                        print(f"SD viewer goto raised (likely the PDF response already fired): {e}")
+                pdf_response = await pdf_resp_info.value
+                pdf_body = await pdf_response.body()
+                if pdf_response.status == 200 and pdf_body.startswith(b"%PDF"):
+                    with open(file_path, "wb") as f:
+                        f.write(pdf_body)
+                    print(
+                        f"SD asset-direct path succeeded "
+                        f"({len(pdf_body)} bytes intercepted from {pdf_response.url[:80]}...)."
+                    )
+                    return file_path
+                print(
+                    f"SD intercepted PDF response was not a valid PDF: status={pdf_response.status}, "
+                    f"url={pdf_response.url[:120]!r}, body={len(pdf_body)}B"
+                )
+            except Exception as e:
+                print(f"SD response interception failed, falling back to viewer button flow: {e}")
+
+            # Check for DataDome on the EPDF page (only relevant if the viewer didn't already
+            # redirect to a signed PDF URL above).
             captcha_detected = False
             for _ in range(15):
                 try:
