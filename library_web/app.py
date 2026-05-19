@@ -126,6 +126,31 @@ def search_delete(search_id: int):
     return RedirectResponse(url="/searches", status_code=303)
 
 
+@app.get("/browser-state", response_class=HTMLResponse)
+def browser_state(request: Request):
+    lib = get_library()
+    rows = lib.list_browser_states()
+    return _render("browser_state.html", request, rows=rows)
+
+
+@app.post("/browser-state/{platform}/clear-cookies")
+def browser_state_clear_cookies(platform: str):
+    """Drop cookies + verified flag but keep the pinned fingerprint, so the
+    next session re-verifies cleanly without changing identity."""
+    lib = get_library()
+    lib.clear_browser_state(platform, keep_fingerprint=True)
+    return RedirectResponse(url="/browser-state", status_code=303)
+
+
+@app.post("/browser-state/{platform}/reset")
+def browser_state_reset(platform: str):
+    """Full reset: drop cookies AND fingerprint. Next session generates a
+    brand-new identity (use if a platform hard-banned the fingerprint)."""
+    lib = get_library()
+    lib.clear_browser_state(platform, keep_fingerprint=False)
+    return RedirectResponse(url="/browser-state", status_code=303)
+
+
 @app.get("/file")
 def serve_file(path: str):
     """Serve a file from inside the library root. Path traversal is rejected."""

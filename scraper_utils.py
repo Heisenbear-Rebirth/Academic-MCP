@@ -110,6 +110,166 @@ def release_profile(profile_dir: str) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Pooled profiles: let N concurrent MCP servers each get a usable profile dir
+# ---------------------------------------------------------------------------
+# Strategy: the first server to claim a platform uses the canonical
+# .<plat>_profile (its cookies persist naturally). Concurrent servers fall
+# back to an ephemeral per-PID copy so Firefox never sees two processes on
+# one profile. The expensive auth state (cf_clearance + pinned fingerprint)
+# is shared out-of-band via the MySQL library, not the profile dir.
+
+
+def pooled_profile(base_name: str, platform: str) -> tuple[str, bool]:
+    """Return (profile_dir, is_ephemeral).
+
+    Tries the canonical profile first. If a *live* foreign MCP server already
+    owns it, allocates an ephemeral per-PID directory instead so we never
+    block on Firefox's single-instance modal.
+    """
+    from runtime_config import profile_path
+
+    canonical = profile_path(base_name)
+    try:
+        acquire_profile(canonical, platform)
+        return canonical, False
+    except ProfileInUseError:
+        ephemeral = profile_path(f"{base_name}__p{os.getpid()}")
+        # A per-PID dir can only be ours; acquire still records the sentinel.
+        try:
+            acquire_profile(ephemeral, platform)
+        except ProfileInUseError:
+            pass
+        _print(f"[pooled_profile] {platform} canonical busy; using ephemeral {ephemeral}")
+        return ephemeral, True
+
+
+def cleanup_pooled_profile(profile_dir: Optional[str], is_ephemeral: bool) -> None:
+    if not profile_dir:
+        return
+    release_profile(profile_dir)
+    if is_ephemeral:
+        import shutil
+
+        try:
+            shutil.rmtree(profile_dir, ignore_errors=True)
+        except Exception:
+            pass
+
+
+# ---------------------------------------------------------------------------
+# Shared fingerprint + cookies (via the MySQL library)
+# ---------------------------------------------------------------------------
+
+def load_or_create_fingerprint(platform: str):
+    """Return a browserforge Fingerprint that is STABLE across MCP servers.
+
+    cf_clearance / DataDome clearance cookies are bound to the browser
+    fingerprint; reusing one verification across clients only works if every
+    client presents the same fingerprint. We pin one per platform in MySQL.
+    Returns None if the library is unavailable or anything goes wrong (caller
+    then falls back to Camoufox's default per-launch fingerprint).
+    """
+    import base64
+    import pickle
+
+    try:
+        from camoufox.fingerprints import generate_fingerprint
+        from library import get_library
+
+        lib = get_library()
+        if not lib.enabled:
+            return None
+        state = lib.get_browser_state(platform)
+        blob = (state or {}).get("fingerprint") or {}
+        if isinstance(blob, dict) and blob.get("pickle_b64"):
+            try:
+                fp = pickle.loads(base64.b64decode(blob["pickle_b64"]))
+                return fp
+            except Exception as e:
+                _print(f"[fingerprint] {platform} stored fingerprint unusable ({e}); regenerating")
+        fp = generate_fingerprint(os="windows")
+        try:
+            ua = str(fp.navigator.userAgent)
+        except Exception:
+            ua = None
+        encoded = base64.b64encode(pickle.dumps(fp)).decode("ascii")
+        lib.save_browser_fingerprint(platform, {"pickle_b64": encoded}, user_agent=ua)
+        return fp
+    except Exception as e:
+        _print(f"[fingerprint] {platform} load/create failed ({e}); using default")
+        return None
+
+
+_VERIFICATION_COOKIE_HINTS = ("cf_clearance", "datadome", "__ddg", "incap_ses", "visid_incap", "reese84")
+
+
+def _sanitize_cookies(cookies: list) -> list:
+    clean = []
+    for c in cookies or []:
+        if not c.get("name") or "domain" not in c:
+            continue
+        cc = {k: c[k] for k in ("name", "value", "domain", "path") if k in c}
+        if "expires" in c and isinstance(c["expires"], (int, float)) and c["expires"] > 0:
+            cc["expires"] = c["expires"]
+        for b in ("httpOnly", "secure"):
+            if b in c:
+                cc[b] = bool(c[b])
+        ss = c.get("sameSite")
+        if ss in ("Strict", "Lax", "None"):
+            cc["sameSite"] = ss
+        clean.append(cc)
+    return clean
+
+
+async def apply_browser_cookies(context, platform: str) -> bool:
+    """Inject shared cookies into *context* before first navigation."""
+    try:
+        from library import get_library
+
+        lib = get_library()
+        if not lib.enabled:
+            return False
+        state = lib.get_browser_state(platform)
+        cookies = _sanitize_cookies((state or {}).get("cookies") or [])
+        if not cookies:
+            return False
+        await context.add_cookies(cookies)
+        _print(f"[cookies] {platform}: injected {len(cookies)} shared cookies")
+        return True
+    except Exception as e:
+        _print(f"[cookies] {platform} inject failed: {e}")
+        return False
+
+
+async def capture_browser_cookies(context, platform: str, note: str = None) -> None:
+    """Persist *context* cookies to the shared store. Marks the platform
+    'verified' when a known anti-bot clearance cookie is present so the web
+    console / other clients can tell the verification is fresh."""
+    try:
+        from library import get_library
+
+        lib = get_library()
+        if not lib.enabled:
+            return
+        cookies = await context.cookies()
+        if not cookies:
+            return
+        has_clearance = any(
+            any(h in (c.get("name", "").lower()) for h in _VERIFICATION_COOKIE_HINTS)
+            for c in cookies
+        )
+        lib.save_browser_cookies(
+            platform,
+            cookies,
+            mark_verified=has_clearance,
+            note=note or ("verification cookie present" if has_clearance else "session cookies"),
+        )
+        _print(f"[cookies] {platform}: stored {len(cookies)} cookies (verified={has_clearance})")
+    except Exception as e:
+        _print(f"[cookies] {platform} capture failed: {e}")
+
+
+# ---------------------------------------------------------------------------
 # Venue / journal name matching
 # ---------------------------------------------------------------------------
 

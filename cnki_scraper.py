@@ -33,9 +33,13 @@ class CNKIScraper:
             return
 
         self.is_headful = force_headful
+        # CNKI runs plain Chromium (not Camoufox) and keeps its own storage_state
+        # cookie file, so no shared-fingerprint here -- but it still needs a
+        # pooled profile dir so two MCP clients don't fight over one Chromium
+        # SingletonLock.
+        from scraper_utils import pooled_profile
+        self.profile_dir, self._profile_ephemeral = pooled_profile(".cnki_profile", "CNKI")
         os.makedirs(self.profile_dir, exist_ok=True)
-        from scraper_utils import acquire_profile
-        acquire_profile(self.profile_dir, "CNKI")
         # Firefox-style parent.lock cleanup for Camoufox crashes.
         for lock_name in ["lockfile", "SingletonLock", "parent.lock", ".parentlock"]:
             lock_path = os.path.join(self.profile_dir, lock_name)
@@ -87,8 +91,8 @@ class CNKIScraper:
         if self.playwright:
             await self.playwright.stop()
             self.playwright = None
-        from scraper_utils import release_profile
-        release_profile(self.profile_dir)
+        from scraper_utils import cleanup_pooled_profile
+        cleanup_pooled_profile(self.profile_dir, getattr(self, "_profile_ephemeral", False))
 
     async def _goto(self, url: str, wait_until: str = "domcontentloaded", timeout: int = 45000):
         return await self.page.goto(url, wait_until=wait_until, timeout=timeout)

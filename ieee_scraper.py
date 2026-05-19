@@ -23,13 +23,12 @@ class IEEEScraper:
         import json
         self.playwright = None # Will not be used anymore
         
-        from runtime_config import profile_path
-        from scraper_utils import acquire_profile
-        profile_dir = profile_path(".ieee_profile")
-        # Refuse early (clean error, no blocking Firefox modal) if another live MCP
-        # server already owns this profile.
-        acquire_profile(profile_dir, "IEEE")
+        from scraper_utils import pooled_profile, load_or_create_fingerprint
+        # Canonical profile if free; ephemeral per-PID copy if another live MCP
+        # server already owns it -> N clients can run concurrently.
+        profile_dir, self._profile_ephemeral = pooled_profile(".ieee_profile", "IEEE")
         self._profile_dir = profile_dir
+        _shared_fp = load_or_create_fingerprint("IEEE")
         # parent.lock / .parentlock are Firefox-style locks (Camoufox is Firefox-based);
         # lockfile / SingletonLock are Chromium-style. A crashed previous Camoufox session
         # leaves parent.lock behind, and the next launch silently exits if we don't clean it.
@@ -48,7 +47,7 @@ class IEEEScraper:
         from camoufox.async_api import AsyncCamoufox
         # NOTE: do not enable block_images on IEEE — its Cloudflare profile flags the
         # missing-image-requests pattern. Speed gains come from sleep tightening only.
-        self.camoufox_cm = AsyncCamoufox(
+        _cam_kw = dict(
             headless=not force_headful,
             user_data_dir=profile_dir,
             persistent_context=True,
@@ -56,10 +55,26 @@ class IEEEScraper:
             humanize=True,
             geoip=True,
         )
+        if _shared_fp is not None:
+            # Pinned fingerprint is intentional (cf_clearance is bound to it and
+            # must stay identical across clients); silence Camoufox's advisory.
+            _cam_kw["fingerprint"] = _shared_fp
+            _cam_kw["i_know_what_im_doing"] = True
+        self.camoufox_cm = AsyncCamoufox(**_cam_kw)
         self.context = await self.camoufox_cm.__aenter__()
         self.page = self.context.pages[0] if self.context.pages else await self.context.new_page()
+        # Seed shared cf_clearance/DataDome cookies before any navigation so a
+        # verification solved by another client carries over.
+        from scraper_utils import apply_browser_cookies
+        await apply_browser_cookies(self.context, "IEEE")
 
     async def close(self):
+        if getattr(self, "context", None):
+            try:
+                from scraper_utils import capture_browser_cookies
+                await capture_browser_cookies(self.context, "IEEE")
+            except Exception:
+                pass
         if hasattr(self, 'page') and self.page:
             try:
                 await self.page.close()
@@ -75,8 +90,8 @@ class IEEEScraper:
             self.context = None
             self.playwright = None
         if getattr(self, "_profile_dir", None):
-            from scraper_utils import release_profile
-            release_profile(self._profile_dir)
+            from scraper_utils import cleanup_pooled_profile
+            cleanup_pooled_profile(self._profile_dir, getattr(self, "_profile_ephemeral", False))
             self._profile_dir = None
 
     async def search_papers(self, query: str, search_field: str = "All", db_scope: str = "", source_type: str = "all", journal: str = None, start_year: int = None, end_year: int = None, sort_by: str = "relevance", start_index: int = 0, limit: int = 10) -> Dict:
@@ -278,6 +293,14 @@ class IEEEScraper:
                 except Exception:
                     break
                     
+        # We have results -> we are past Cloudflare; persist the good cookies
+        # so concurrent / future clients skip the manual challenge.
+        try:
+            from scraper_utils import capture_browser_cookies
+            await capture_browser_cookies(self.context, "IEEE")
+        except Exception:
+            pass
+
         return {
             "total_results": total_count,
             "papers": results

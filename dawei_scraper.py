@@ -44,9 +44,10 @@ class DaweiScraper:
         if self.context:
             return
 
+        # Dawei runs plain Chromium; pooled profile for concurrency safety.
+        from scraper_utils import pooled_profile
+        self.profile_dir, self._profile_ephemeral = pooled_profile(".dawei_profile", "DAWEI")
         os.makedirs(self.profile_dir, exist_ok=True)
-        from scraper_utils import acquire_profile
-        acquire_profile(self.profile_dir, "DAWEI")
         # Firefox-style parent.lock cleanup for Camoufox crashes.
         for lock_name in ["lockfile", "SingletonLock", "parent.lock", ".parentlock"]:
             lock_path = os.path.join(self.profile_dir, lock_name)
@@ -80,8 +81,8 @@ class DaweiScraper:
         if self.playwright:
             await self.playwright.stop()
             self.playwright = None
-        from scraper_utils import release_profile
-        release_profile(self.profile_dir)
+        from scraper_utils import cleanup_pooled_profile
+        cleanup_pooled_profile(self.profile_dir, getattr(self, "_profile_ephemeral", False))
 
     @staticmethod
     def _strip_html(value) -> str:

@@ -77,11 +77,10 @@ class ACMScraper:
             await self._reset_state()
         if not self.context:
             print(f"Initializing ACM Persistent Browser Context (Headless: {not force_headful})...")
-            from runtime_config import profile_path
-            from scraper_utils import acquire_profile
-            profile_dir = profile_path(".acm_profile")
-            acquire_profile(profile_dir, "ACM")
+            from scraper_utils import pooled_profile, load_or_create_fingerprint
+            profile_dir, self._profile_ephemeral = pooled_profile(".acm_profile", "ACM")
             self._profile_dir = profile_dir
+            _shared_fp = load_or_create_fingerprint("ACM")
 
             # Include Firefox-style parent.lock / .parentlock so a crashed prior Camoufox
             # process can't keep us from launching.
@@ -97,7 +96,7 @@ class ACMScraper:
             # Using OSINT stealth browser to evade hard blocks.
             # Keep ACM Camoufox-only: ordinary Chromium is less useful against ACM/Cloudflare.
             # ACM rides Cloudflare Turnstile + DataDome; image blocking is detectable.
-            self.camoufox_cm = AsyncCamoufox(
+            _cam_kw = dict(
                 headless=not force_headful,
                 user_data_dir=profile_dir,
                 persistent_context=True,
@@ -105,9 +104,16 @@ class ACMScraper:
                 humanize=True,
                 geoip=True,
             )
+            if _shared_fp is not None:
+                _cam_kw["fingerprint"] = _shared_fp
+                _cam_kw["i_know_what_im_doing"] = True
+            self.camoufox_cm = AsyncCamoufox(**_cam_kw)
             self.context = await self.camoufox_cm.__aenter__()
             self.page = self.context.pages[0] if self.context.pages else await self.context.new_page()
-            
+
+            from scraper_utils import apply_browser_cookies, capture_browser_cookies
+            await apply_browser_cookies(self.context, "ACM")
+
             # Navigate to ACM to acquire initial cookies and bypass CF
             print("Navigating to ACM DL (Resolving protections)...")
             await self.page.goto("https://dl.acm.org", wait_until="domcontentloaded", timeout=45000)
@@ -160,6 +166,8 @@ class ACMScraper:
             except Exception as e:
                 pass
                 
+            if not cf_blocked:
+                await capture_browser_cookies(self.context, "ACM")
             print("ACM context initialized successfully.")
 
     async def _safe_page_content(self, retries: int = 8) -> str:
@@ -182,6 +190,12 @@ class ACMScraper:
         await self._ensure_browser()
 
     async def close(self):
+        if getattr(self, "context", None):
+            try:
+                from scraper_utils import capture_browser_cookies
+                await capture_browser_cookies(self.context, "ACM")
+            except Exception:
+                pass
         if hasattr(self, 'camoufox_cm') and self.camoufox_cm:
             try:
                 await self.camoufox_cm.__aexit__(None, None, None)
@@ -196,8 +210,8 @@ class ACMScraper:
             await self.playwright.stop()
             self.playwright = None
         if getattr(self, "_profile_dir", None):
-            from scraper_utils import release_profile
-            release_profile(self._profile_dir)
+            from scraper_utils import cleanup_pooled_profile
+            cleanup_pooled_profile(self._profile_dir, getattr(self, "_profile_ephemeral", False))
             self._profile_dir = None
 
     async def search_papers(self, query: str, search_field: str = "AllField", db_scope: str = "", source_type: str = "all", journal: str = None, start_year: int = None, end_year: int = None, sort_by: str = "relevance", start_index: int = 0, limit: int = 10) -> Dict:

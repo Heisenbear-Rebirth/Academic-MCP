@@ -13,6 +13,7 @@
     <a href="/" class="{% if request.url.path == '/' %}active{% endif %}">总览</a>
     <a href="/papers" class="{% if request.url.path.startswith('/papers') %}active{% endif %}">论文</a>
     <a href="/searches" class="{% if request.url.path.startswith('/searches') %}active{% endif %}">搜索缓存</a>
+    <a href="/browser-state" class="{% if request.url.path.startswith('/browser-state') %}active{% endif %}">浏览器状态</a>
   </nav>
   <span style="margin-left:auto;color:#959da5;font-size:12px;">{{ library_root }}</span>
 </header>

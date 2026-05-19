@@ -274,6 +274,22 @@ class Library:
                     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
                     """
                 )
+                # Shared browser auth state so N concurrent MCP clients can reuse one
+                # manual verification: pinned Camoufox fingerprint + cf_clearance/DataDome
+                # cookies live here, not in any single profile dir.
+                cur.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS browser_state (
+                        platform VARCHAR(32) NOT NULL PRIMARY KEY,
+                        fingerprint MEDIUMTEXT,
+                        cookies MEDIUMTEXT,
+                        user_agent VARCHAR(512),
+                        verified_at DATETIME NULL,
+                        updated_at DATETIME NULL,
+                        note VARCHAR(255)
+                    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+                    """
+                )
 
     def ensure_ready(self) -> bool:
         if self._ready or self._disabled_reason:
@@ -594,6 +610,128 @@ class Library:
             with conn.cursor() as cur:
                 cur.execute("DELETE FROM search_queries WHERE id=%s", (int(search_id),))
                 return cur.rowcount > 0
+
+    # -- Shared browser auth state ------------------------------------
+
+    @staticmethod
+    def _decode_json_field(value: Any, default: Any):
+        if value is None:
+            return default
+        if isinstance(value, (bytes, bytearray)):
+            value = value.decode("utf-8", errors="replace")
+        if isinstance(value, str):
+            try:
+                return json.loads(value)
+            except Exception:
+                return default
+        return value
+
+    def get_browser_state(self, platform: str) -> Optional[Dict[str, Any]]:
+        if not self.enabled:
+            return None
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT platform, fingerprint, cookies, user_agent, verified_at, "
+                    "updated_at, note FROM browser_state WHERE platform=%s LIMIT 1",
+                    ((platform or "").upper(),),
+                )
+                row = cur.fetchone()
+        if not row:
+            return None
+        row = dict(row)
+        row["fingerprint"] = self._decode_json_field(row.get("fingerprint"), None)
+        row["cookies"] = self._decode_json_field(row.get("cookies"), [])
+        return row
+
+    def save_browser_fingerprint(self, platform: str, fingerprint: Dict[str, Any], user_agent: str = None) -> None:
+        if not self.enabled:
+            return
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO browser_state (platform, fingerprint, user_agent, updated_at)
+                    VALUES (%s, %s, %s, NOW())
+                    ON DUPLICATE KEY UPDATE
+                        fingerprint=VALUES(fingerprint),
+                        user_agent=COALESCE(VALUES(user_agent), user_agent),
+                        updated_at=NOW()
+                    """,
+                    (
+                        (platform or "").upper(),
+                        json.dumps(fingerprint, ensure_ascii=False),
+                        user_agent,
+                    ),
+                )
+
+    def save_browser_cookies(
+        self,
+        platform: str,
+        cookies: List[Dict[str, Any]],
+        *,
+        mark_verified: bool = False,
+        user_agent: str = None,
+        note: str = None,
+    ) -> None:
+        if not self.enabled:
+            return
+        verified_clause = "verified_at=NOW()," if mark_verified else ""
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"""
+                    INSERT INTO browser_state (platform, cookies, user_agent, {'verified_at,' if mark_verified else ''} updated_at, note)
+                    VALUES (%s, %s, %s, {'NOW(),' if mark_verified else ''} NOW(), %s)
+                    ON DUPLICATE KEY UPDATE
+                        cookies=VALUES(cookies),
+                        user_agent=COALESCE(VALUES(user_agent), user_agent),
+                        {verified_clause}
+                        updated_at=NOW(),
+                        note=COALESCE(VALUES(note), note)
+                    """,
+                    (
+                        (platform or "").upper(),
+                        json.dumps(cookies or [], ensure_ascii=False),
+                        user_agent,
+                        note,
+                    ),
+                )
+
+    def clear_browser_state(self, platform: str, *, keep_fingerprint: bool = True) -> bool:
+        if not self.enabled:
+            return False
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                if keep_fingerprint:
+                    cur.execute(
+                        "UPDATE browser_state SET cookies=NULL, verified_at=NULL, "
+                        "updated_at=NOW(), note='cookies cleared' WHERE platform=%s",
+                        ((platform or "").upper(),),
+                    )
+                else:
+                    cur.execute(
+                        "DELETE FROM browser_state WHERE platform=%s",
+                        ((platform or "").upper(),),
+                    )
+                return cur.rowcount > 0
+
+    def list_browser_states(self) -> List[Dict[str, Any]]:
+        if not self.enabled:
+            return []
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT platform, user_agent, verified_at, updated_at, note, "
+                    "CHAR_LENGTH(COALESCE(cookies,'')) AS cookies_len, "
+                    "CHAR_LENGTH(COALESCE(fingerprint,'')) AS fp_len "
+                    "FROM browser_state ORDER BY platform"
+                )
+                rows = [dict(r) for r in cur.fetchall()]
+        for r in rows:
+            r["has_fingerprint"] = bool(r.pop("fp_len", 0))
+            r["has_cookies"] = bool(r.pop("cookies_len", 0))
+        return rows
 
     # -- High-level helpers (async-friendly) --------------------------
 

@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block title %}浏览器状态{% endblock %}
+{% block content %}
+<div class="card">
+  <h2>共享浏览器认证状态</h2>
+  <p class="muted">
+    指纹（fingerprint）与人机验证 cookie（cf_clearance / DataDome 等）存在数据库里，
+    所有 MCP client 共享：一次手动验证，全部 client 复用，直到验证过期。
+  </p>
+  <table>
+    <thead>
+      <tr>
+        <th>平台</th>
+        <th>指纹</th>
+        <th>验证 Cookie</th>
+        <th>最近验证</th>
+        <th>更新时间</th>
+        <th>备注</th>
+        <th>操作</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in rows %}
+      <tr>
+        <td><span class="pill platform">{{ r.platform }}</span></td>
+        <td>
+          {% if r.has_fingerprint %}<span class="pill has-file">已固定</span>{% else %}<span class="pill no-file">无</span>{% endif %}
+        </td>
+        <td>
+          {% if r.has_cookies %}<span class="pill has-file">有</span>{% else %}<span class="pill no-file">无</span>{% endif %}
+        </td>
+        <td class="muted">{{ r.verified_at or "—" }}</td>
+        <td class="muted">{{ r.updated_at or "—" }}</td>
+        <td class="muted">{{ r.note or "—" }}</td>
+        <td>
+          <form action="/browser-state/{{ r.platform }}/clear-cookies" method="post" style="display:inline;"
+                onsubmit="return confirm('清除 {{ r.platform }} 的 cookie（保留指纹）？下次会要求重新人机验证。');">
+            <button type="submit" class="btn">清 Cookie</button>
+          </form>
+          <form action="/browser-state/{{ r.platform }}/reset" method="post" style="display:inline;"
+                onsubmit="return confirm('完全重置 {{ r.platform }}（cookie + 指纹都删）？仅在该平台封了当前指纹时使用。');">
+            <button type="submit" class="danger">完全重置</button>
+          </form>
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="7" class="muted" style="text-align:center;padding:24px;">
+        还没有任何平台的浏览器状态。首次搜索后会自动写入。
+      </td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<div class="card">
+  <h3>说明</h3>
+  <ul class="muted" style="line-height:1.8;">
+    <li><strong>清 Cookie</strong>：删掉验证 cookie 但保留指纹身份。下次该平台会要求重新过一次人机验证（指纹不变，过验证更容易）。</li>
+    <li><strong>完全重置</strong>：cookie 和指纹一起删。下次生成全新身份——仅当某平台明确封禁了当前指纹时才用。</li>
+    <li>并发多 client：第一个 client 用主 profile，后续 client 自动用临时 profile，但都从这里共享 cookie/指纹，无需各自重新验证。</li>
+  </ul>
+</div>
+{% endblock %}
