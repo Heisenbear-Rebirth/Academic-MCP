@@ -10,9 +10,76 @@ import os
 import re
 from typing import Any, Iterable, Optional
 
+from urllib.parse import urlparse
+
 from mcp_logging import safe_stderr_print
 
 _print = safe_stderr_print
+
+
+# ---------------------------------------------------------------------------
+# Cross-platform URL routing helpers
+# ---------------------------------------------------------------------------
+# Google Scholar aggregates results across publishers, so its `detail_link`
+# can be an arXiv abs page, an IEEE Xplore document, an MDPI article, a
+# Springer chapter, etc. Most callers want to ask "can I hand this URL to
+# get_paper_details, and if so on which platform?". The mapping below
+# answers that without hard-coding the lookup in every caller.
+
+_PLATFORM_DOMAIN_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
+    ("ARXIV",  re.compile(r"(?:^|\.)arxiv\.org$", re.IGNORECASE)),
+    ("IEEE",   re.compile(r"(?:^|\.)ieee(?:xplore)?\.ieee\.org$|(?:^|\.)ieeexplore\.ieee\.org$", re.IGNORECASE)),
+    ("ACM",    re.compile(r"(?:^|\.)acm\.org$", re.IGNORECASE)),
+    ("SD",     re.compile(r"(?:^|\.)sciencedirect\.com$|(?:^|\.)linkinghub\.elsevier\.com$", re.IGNORECASE)),
+    ("CNKI",   re.compile(r"(?:^|\.)cnki\.(?:com\.cn|net)$", re.IGNORECASE)),
+    ("PATYEE", re.compile(r"(?:^|\.)patyee\.com$", re.IGNORECASE)),
+    ("DAWEI",  re.compile(r"(?:^|\.)daweisoft\.com$", re.IGNORECASE)),
+)
+
+
+def platform_hint_from_url(url: str) -> str:
+    """Map a URL to the platform code that can fetch its details.
+
+    Returns one of ARXIV / IEEE / ACM / SD / CNKI / PATYEE / DAWEI when the
+    URL hostname matches a known publisher; returns ``"EXTERNAL"`` for any
+    third-party site (MDPI, Springer, Wiley, Nature, ...) the server cannot
+    route to a native scraper.
+    """
+    if not url:
+        return "EXTERNAL"
+    try:
+        host = (urlparse(url).hostname or "").lower()
+    except Exception:
+        return "EXTERNAL"
+    if not host:
+        return "EXTERNAL"
+    for code, pattern in _PLATFORM_DOMAIN_PATTERNS:
+        if pattern.search(host):
+            return code
+    return "EXTERNAL"
+
+
+# ACM DOIs are universally prefixed `10.1145/`, but the public site sometimes
+# serves URLs without that prefix in the path (`/doi/3447928.3456707` instead
+# of `/doi/10.1145/3447928.3456707`). The naive `split('/')[-1]` fallback that
+# previously lived in acm_scraper produced non-canonical DOIs in that case,
+# which then poisoned the PDF download URL and the library cache key. This
+# helper resolves both forms to the canonical DOI.
+_ACM_DOI_WITH_PREFIX = re.compile(r"/doi/(?:abs/|full/|pdf/)?(10\.\d+/[^/?#]+)", re.IGNORECASE)
+_ACM_DOI_BARE = re.compile(r"/doi/(?:abs/|full/|pdf/)?(\d+(?:\.\d+)+)(?:[/?#]|$)")
+
+
+def normalize_acm_doi(url: str) -> str:
+    """Return the canonical ACM DOI for a dl.acm.org URL, or '' if unparseable."""
+    if not url:
+        return ""
+    m = _ACM_DOI_WITH_PREFIX.search(url)
+    if m:
+        return m.group(1)
+    m = _ACM_DOI_BARE.search(url)
+    if m:
+        return f"10.1145/{m.group(1)}"
+    return ""
 
 
 # ---------------------------------------------------------------------------

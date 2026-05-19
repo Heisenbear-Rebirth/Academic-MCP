@@ -363,8 +363,8 @@ class ACMScraper:
 
             # ACM detail URLs always carry the DOI (/doi/10.xxxx/yyyy). Surface it so callers
             # can disambiguate venues / dedupe against other platforms without an extra fetch.
-            doi_match = re.search(r'/doi/(?:abs/|full/|pdf/)?(10\.[^/?#]+/[^/?#]+)', link)
-            doi = doi_match.group(1) if doi_match else ""
+            from scraper_utils import normalize_acm_doi
+            doi = normalize_acm_doi(link)
 
             # Venue (journal / proceedings name) sits in the meta-line of the item card.
             venue_tag = item.select_one(".issue-item__detail a, .epub-section__title")
@@ -425,10 +425,11 @@ class ACMScraper:
         for tag in kw_tags:
             keywords.append(tag.text.strip())
             
-        # doi is in the URL usually
-        doi_match = re.search(r'doi/(10\.[^/]+/[^/]+)', detail_url)
-        doi = doi_match.group(1) if doi_match else detail_url.split('/')[-1]
-            
+        # ACM DOI is universally prefixed `10.1145/`. normalize_acm_doi
+        # recovers bare-ID URLs (`/doi/3447928.3456707`) too.
+        from scraper_utils import normalize_acm_doi
+        doi = normalize_acm_doi(detail_url)
+
         return {
             "url": detail_url,
             "abstract": abstract.replace('\n', ' '),
@@ -439,10 +440,12 @@ class ACMScraper:
     async def download_paper(self, detail_url: str, output_dir: str) -> str:
         await self._ensure_browser()
         os.makedirs(output_dir, exist_ok=True)
-        
-        doi_match = re.search(r'doi/(10\.[^/]+/[^?]+)', detail_url)
-        doi = doi_match.group(1) if doi_match else detail_url.split('/')[-1]
-        
+
+        from scraper_utils import normalize_acm_doi
+        doi = normalize_acm_doi(detail_url)
+        if not doi:
+            return f"Could not parse ACM DOI from URL: {detail_url}"
+
         # ACM direct PDF link
         pdf_url = f"https://dl.acm.org/doi/pdf/{doi}"
         
@@ -530,10 +533,10 @@ class ACMScraper:
 
     async def fetch_ris(self, detail_url: str) -> str:
         """ACM Digital Library serves RIS via /action/downloadCitation."""
-        m = re.search(r"/doi/(?:abs/|full/|pdf/)?(10\.[^/?#]+/[^/?#]+)", detail_url)
-        if not m:
+        from scraper_utils import normalize_acm_doi
+        doi = normalize_acm_doi(detail_url)
+        if not doi:
             return ""
-        doi = m.group(1)
         await self._ensure_browser()
         url = (
             "https://dl.acm.org/action/downloadCitation"

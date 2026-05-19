@@ -231,6 +231,7 @@ class GoogleScholarScraper:
 
             uid = hashlib.md5(detail_link.encode()).hexdigest()[:8]
 
+            from scraper_utils import platform_hint_from_url
             results.append({
                 "id": uid,
                 "title": title,
@@ -240,6 +241,7 @@ class GoogleScholarScraper:
                 "date": date,
                 "db_type": "GS Aggregated",
                 "detail_link": detail_link,
+                "recommended_platform": platform_hint_from_url(detail_link),
                 "_gs_snippet": snippet,
             })
             collected += 1

@@ -78,8 +78,10 @@ def _arxiv_native_id(url: str) -> str:
 
 
 def _acm_native_id(url: str) -> str:
-    match = re.search(r"/doi/(?:abs/|full/|pdf/)?(10\.[^/?#]+/[^/?#]+)", url)
-    return match.group(1) if match else ""
+    # Delegate so bare-ID URLs (`/doi/3447928.3456707`) still resolve to the
+    # canonical 10.1145/... native_id used as the cache primary key.
+    from scraper_utils import normalize_acm_doi
+    return normalize_acm_doi(url)
 
 
 def _sd_native_id(url: str) -> str:
