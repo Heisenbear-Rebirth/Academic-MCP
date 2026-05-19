@@ -27,6 +27,24 @@ def safe_stem(name: str, default: str = "document") -> str:
     return stem[:140] or default
 
 
+# Some publisher PDFs (notably a chunk of IEEE conference proceedings) embed
+# subsetted fonts without a ToUnicode CMap. They render visually but every
+# glyph extracts as U+FFFD, so pymupdf4llm yields a non-empty Markdown that is
+# pure mojibake. The plain `not md_text.strip()` check never catches this, so
+# we measure the replacement-char density against real (non-whitespace,
+# non-Markdown-structural) content and treat a garbled extraction the same as
+# an empty one.
+_MD_STRUCTURAL = set("#*->|`[]()!_ \t\r\n")
+
+
+def _text_is_unusable(md_text: str, *, threshold: float = 0.30) -> bool:
+    content = [c for c in md_text if c not in _MD_STRUCTURAL]
+    if not content:
+        return True
+    fffd = sum(1 for c in content if c == "�")
+    return (fffd / len(content)) > threshold
+
+
 def convert_pdf_to_markdown(pdf_path: str, output_dir: str, *, image_format: str = "png") -> MarkdownConversion:
     """Convert a PDF to Markdown and never silently accept an empty result."""
     pdf = Path(pdf_path)
@@ -48,14 +66,21 @@ def convert_pdf_to_markdown(pdf_path: str, output_dir: str, *, image_format: str
     )
     image_only = False
 
-    if not md_text.strip():
+    if not md_text.strip() or _text_is_unusable(md_text):
         image_only = True
+        garbled = bool(md_text.strip())
         doc = fitz.open(str(pdf))
         stem = safe_stem(pdf.name)
+        note = (
+            "> The PDF's embedded fonts lack a Unicode mapping, so the text"
+            " layer extracted as garbage; pages were rendered as images instead."
+            if garbled
+            else "> No extractable text was found in this PDF; pages were rendered as images."
+        )
         lines = [
             f"# {stem}",
             "",
-            "> No extractable text was found in this PDF; pages were rendered as images.",
+            note,
             "",
         ]
         for page_index, page in enumerate(doc, start=1):

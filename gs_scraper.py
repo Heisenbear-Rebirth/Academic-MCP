@@ -12,6 +12,34 @@ import re
 
 print = safe_stderr_print
 
+
+# Google Scholar rotates several anti-bot interstitials. The one that was
+# slipping through (captured in scratch/gs_norows_*.html) is a reCAPTCHA page
+# built as <form id="gs_captcha_f"><h1>Please show you're not a robot</h1>
+# <div id="gs_captcha_c">...iframe...</div></form> -- it carries NONE of the
+# markers the old detector looked for (form#captcha-form / div.g-recaptcha /
+# "One more step"), yet still echoes a gs_ab_md result count, so the scraper
+# happily parsed "total=820000, papers=[]". This matches every known variant.
+_GS_CAPTCHA_SELECTOR = (
+    "form#captcha-form, form#gs_captcha_f, "
+    "#gs_captcha_c, #gs_captcha_ccl, "
+    "div.g-recaptcha, #g-recaptcha-response, "
+    "h1:-soup-contains('One more step'), "
+    "h1:-soup-contains(\"not a robot\")"
+)
+_GS_BLOCK_TEXT = (
+    "Please show you're not a robot",
+    "Please show you’re not a robot",
+    "our systems have detected unusual traffic",
+)
+
+
+def _gs_is_blocked(soup, html: str) -> bool:
+    if soup.select_one(_GS_CAPTCHA_SELECTOR):
+        return True
+    return any(t in html for t in _GS_BLOCK_TEXT)
+
+
 class GoogleScholarScraper:
     def __init__(self):
         self.playwright = None
@@ -116,7 +144,7 @@ class GoogleScholarScraper:
         soup = bs4.BeautifulSoup(html, 'html.parser')
         
         # Check for captcha
-        if soup.select_one("form#captcha-form, div.g-recaptcha, h1:-soup-contains('One more step')"):
+        if _gs_is_blocked(soup, html):
             # We assume headless if no explicit tracking is used
             if not hasattr(self, 'is_headful'):
                 print("[Anti-Bot] GS CAPTCHA detected! Relaunching headful for manual check...")
@@ -130,7 +158,7 @@ class GoogleScholarScraper:
                 for _ in range(60):
                     html = await self.page.content()
                     soup = bs4.BeautifulSoup(html, 'html.parser')
-                    if not soup.select_one("form#captcha-form, div.g-recaptcha, h1:-soup-contains('One more step')"):
+                    if not _gs_is_blocked(soup, html):
                         solved = True
                         break
                     await asyncio.sleep(1)
@@ -174,7 +202,25 @@ class GoogleScholarScraper:
         
         results = []
         rows = soup.select("div.gs_ri, div.gs_r")
-        
+
+        # DIAGNOSTIC: GS sometimes returns a page where the result count
+        # parses fine but zero result rows are present (a soft-block variant
+        # that doesn't match our CAPTCHA selectors). Dump the exact HTML our
+        # browser received so we can build a precise detector. Best-effort;
+        # never let instrumentation break the scrape.
+        if not rows and total_results not in ("未知", "0"):
+            try:
+                import time as _t
+                _dump_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "scratch")
+                os.makedirs(_dump_dir, exist_ok=True)
+                _dump = os.path.join(_dump_dir, f"gs_norows_{int(_t.time())}.html")
+                with open(_dump, "w", encoding="utf-8") as _f:
+                    _f.write(f"<!-- query={query!r} total={total_results} url={self.page.url} -->\n")
+                    _f.write(html)
+                print(f"[GS][DIAG] total={total_results} but 0 rows; HTML dumped -> {_dump}")
+            except Exception as _e:
+                print(f"[GS][DIAG] dump failed: {_e}")
+
         collected = 0
         seen_links = set()
         

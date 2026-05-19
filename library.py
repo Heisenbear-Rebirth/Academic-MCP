@@ -168,6 +168,33 @@ def compute_query_hash(platform: str, query: str, filters: Dict[str, Any]) -> st
     return hashlib.md5(blob.encode("utf-8")).hexdigest()
 
 
+# Search caches are permanent by design, so a poisoned response (an anti-bot
+# soft-block that still echoes a result count but ships zero rows, or an
+# explicit CAPTCHA / IP-ban sentinel) must NOT be written -- otherwise every
+# later call returns the fossilized empty result. A genuine zero-hit query is
+# fine to cache: it reports total 0 (or a non-numeric "unknown") with no rows.
+_BLOCK_TOTALS = {"CAPTCHA (403)", "IP_BANNED"}
+
+
+def search_result_is_cacheable(results: Any) -> bool:
+    if not isinstance(results, dict):
+        return False
+    papers = results.get("papers") or []
+    total_raw = str(results.get("total_results", "")).strip()
+    if total_raw in _BLOCK_TOTALS:
+        return False
+    if any(isinstance(p, dict) and str(p.get("id", "")).startswith("err") for p in papers):
+        return False
+    if papers:
+        return True
+    # No rows: only cacheable if the platform genuinely reported zero matches.
+    digits = re.sub(r"[,\s]", "", total_raw)
+    if digits.isdigit() and int(digits) > 0:
+        # Count says there ARE matches but we parsed none -> soft block.
+        return False
+    return True
+
+
 # ---------------------------------------------------------------------------
 # MySQL connection management
 # ---------------------------------------------------------------------------
@@ -821,6 +848,12 @@ class Library:
             return cached, True
 
         results = await fetch_coro_factory()
+        # A soft-blocked / CAPTCHA'd response must never poison the permanent
+        # cache. Return it to the caller so they see the failure, but don't
+        # persist it -- the next call will retry the live fetch.
+        if not search_result_is_cacheable(results):
+            print(f"[Library] {platform} result not cacheable (likely soft-block); skipping persist.")
+            return results, False
         # Persist search cache + each paper as a side effect.
         try:
             await asyncio.to_thread(
