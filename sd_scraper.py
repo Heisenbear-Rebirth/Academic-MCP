@@ -681,27 +681,51 @@ class ScienceDirectScraper:
             return f"PDF downloaded to {pdf_path} but Markdown conversion failed: {str(e)}"
 
     async def fetch_ris(self, detail_url: str) -> str:
-        """ScienceDirect: their public sdfe/arp/cite endpoint serves RIS."""
+        """ScienceDirect: their public sdfe/arp/cite endpoint serves RIS.
+
+        Direct context.request.get is silently blocked by DataDome
+        (returns 403 + ~830KB challenge HTML even with cookies attached).
+        Issuing the request from inside the page via fetch() makes it
+        look like a normal in-app XHR and clears the challenge.
+        """
         m = re.search(r"/pii/([A-Za-z0-9]+)", detail_url)
         if not m:
             return ""
         pii = m.group(1)
         await self._ensure_browser()
+        # The in-page fetch must originate from a ScienceDirect article
+        # so DataDome sees a coherent referrer + live cookies. If a prior
+        # get_paper_details left us on this exact PII we reuse it; otherwise
+        # navigate.
+        try:
+            current = self.page.url or ""
+        except Exception:
+            current = ""
+        if pii not in current:
+            try:
+                await self.page.goto(detail_url, wait_until="domcontentloaded", timeout=30000)
+            except Exception as e:
+                print(f"[SD] fetch_ris pre-nav failed: {e}")
+                return ""
         url = (
             "https://www.sciencedirect.com/sdfe/arp/cite"
             f"?pii={pii}&format=application/x-research-info-systems&withabstract=true"
         )
+        js = """async (u) => {
+            const r = await fetch(u, {
+                credentials: 'include',
+                headers: {'Accept': 'application/x-research-info-systems,*/*'}
+            });
+            return {status: r.status, body: await r.text()};
+        }"""
         try:
-            resp = await self.context.request.get(
-                url,
-                headers={"Referer": detail_url, "Accept": "application/x-research-info-systems,*/*"},
-                timeout=30000,
-            )
-            if resp.status != 200:
-                return ""
-            body = (await resp.text()).replace("\r\n", "\n").strip()
-            if "TY  - " in body and "ER" in body:
+            out = await self.page.evaluate(js, url)
+            status = out.get("status") if isinstance(out, dict) else None
+            body = (out.get("body") or "") if isinstance(out, dict) else ""
+            body = body.replace("\r\n", "\n").strip()
+            if status == 200 and "TY  - " in body and "ER" in body:
                 return body
+            print(f"[SD] fetch_ris non-RIS response: status={status} len={len(body)}")
         except Exception as e:
             print(f"[SD] fetch_ris failed: {e}")
         return ""

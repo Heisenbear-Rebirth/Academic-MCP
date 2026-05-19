@@ -1,0 +1,457 @@
+# Academic MCP Server（中文）
+
+> English version: [README.md](README.md)
+
+一个 Model Context Protocol（MCP）服务器，对外暴露统一的论文检索 +
+全文抽取接口，底层覆盖 8 个学术 / 专利来源：
+
+| 代号       | 来源                                       | 浏览器引擎          |
+| --------- | ----------------------------------------- | ------------------ |
+| `ARXIV`   | arXiv（预印本）                              | Camoufox（Firefox） |
+| `CNKI`    | 中国知网                                     | Playwright Chromium |
+| `IEEE`    | IEEE Xplore                               | Camoufox（Firefox） |
+| `ACM`     | ACM Digital Library                       | Camoufox（Firefox） |
+| `SD`      | ScienceDirect（Elsevier）                   | Camoufox（Firefox） |
+| `GS`      | Google Scholar                            | Camoufox（Firefox） |
+| `PATYEE`  | 专利之星 Patyee                              | Playwright Chromium |
+| `DAWEI`   | 大为专利（pat.daweisoft.com）                 | Playwright Chromium |
+
+每个来源都包了一层 per-platform scraper 以保证返回结构统一，所有
+下载 / 转换都先过一遍本地 MySQL 论文库：重复搜索走缓存、多个 MCP
+客户端共享浏览器认证状态、PDF / Markdown 在磁盘上去重。
+
+整套设计的目标使用方式是作为 MCP 工具接入 LLM Agent（Claude
+Desktop、Codex 等），但底层模块单独当 CLI / Python 库用也没问题。
+
+---
+
+## 架构
+
+```
+┌──────────────────────────────────────────────────────────────────────┐
+│  MCP 客户端（Claude / Codex / ...）                                  │
+└────────────────────────────┬─────────────────────────────────────────┘
+                             │ MCP 工具调用
+                             ▼
+┌──────────────────────────────────────────────────────────────────────┐
+│  server.py  —  FastMCP 入口，按 platform 派发到对应 scraper           │
+│  ┌──────────────────────────┐    ┌────────────────────────────────┐  │
+│  │  Library（library.py）   │◄──►│  Scrapers（8 个模块）            │  │
+│  │  MySQL: papers,          │    │  - 每平台单例持有一份             │  │
+│  │         search_queries,  │    │    Camoufox/Chromium             │  │
+│  │         browser_state    │    │    persistent context            │  │
+│  │  Files: .repo/{平台}     │    │  - canonical profile 被占用时    │  │
+│  │         /{native_id}/    │    │    自动落到 per-PID 副本         │  │
+│  └──────────────────────────┘    └────────────────────────────────┘  │
+└────────────────────────────┬─────────────────────────────────────────┘
+                             │ 可选
+                             ▼
+┌──────────────────────────────────────────────────────────────────────┐
+│  library_web/  —  FastAPI/Jinja2 管理控制台（默认端口 5577）          │
+│  /  /papers  /papers/{p}/{id}  /searches  /browser-state  /file      │
+└──────────────────────────────────────────────────────────────────────┘
+```
+
+每次 MCP 工具调用都会先穿过 Library：
+
+- **搜索**：对 `(platform, query, filters)` 三元组取哈希；命中缓存
+  则直接返回，不启动浏览器。
+- **详情 / 下载 / 阅读**：用 URL 抽出 `(platform, native_id)` 作为
+  论文 ID。元数据 / PDF / Markdown 已在磁盘上就直接镜像到调用方
+  的 `output_dir`，跳过抓取。
+- **浏览器状态**：每个 Camoufox scraper 在 platform 维度固定一份
+  指纹，并复用过验证后的 cookies（cf_clearance / DataDome / …），
+  使得一次手动过验证能跨重启、跨多个并发 MCP 客户端继续生效。
+
+---
+
+## 组件
+
+| 路径                          | 职责                                                                                              |
+| ---------------------------- | ------------------------------------------------------------------------------------------------- |
+| `server.py`                  | FastMCP 服务器。暴露 5 个 MCP 工具并接入 Library。                                                  |
+| `runtime_config.py`          | 加载 `mcp_runtime_config.json`，解析项目路径、计算 profile 目录（含 suffix）。                       |
+| `mcp_logging.py`             | UTF-8 安全 stderr 打印器，避免 MCP 的 JSON-RPC over stdio 通道被搞坏。                              |
+| `library.py`                 | `papers / search_queries / browser_state` 表的 MySQL DAO + 文件系统镜像辅助。                       |
+| `scraper_utils.py`           | 共享工具：`goto_with_retry`、`venue_matches`、profile 池、指纹 + cookie 共享。                       |
+| `pdf_utils.py`               | `convert_pdf_to_markdown()`：用 pymupdf4llm，扫描版 PDF 自动回退到逐页图像方案。                     |
+| `{platform}_scraper.py`      | 每个来源一个模块，统一暴露 `search_papers / get_paper_details / download_paper / read_paper_content / close`。 |
+| `library_web/`               | 管理控制台的 FastAPI 应用 + Jinja2 模板。                                                          |
+| `library_web_{start,stop}.{bat,ps1}` | 控制台启 / 停脚本（端口取自 `mcp_runtime_config.json`）。                                  |
+| `.repo/`                     | 文件存储仓库：`.repo/{平台}/{safe_native_id}/paper.pdf` 与 `paper.md`。                              |
+| `.{platform}_profile/`       | 每平台一份浏览器 profile。canonical profile 之外可有 per-PID 临时副本。                              |
+
+---
+
+## 系统要求
+
+- **Python 3.10+**（在 3.11 / 3.12 上测过）。3.10 是 PEP 604 联合类型
+  语法用到的最低版本。
+- **MySQL 5.5+**，本机可达。schema 刻意做了向下兼容（用 `MEDIUMTEXT`
+  代替 `JSON`，索引列固定 ASCII charset，时间列用 `NOW()` 写入避免
+  `DEFAULT CURRENT_TIMESTAMP` 限制）。
+- **Camoufox 内核**：Windows 下自动 fetch 到
+  `%LOCALAPPDATA%\camoufox`，Linux 在 `~/.cache/camoufox`。
+
+---
+
+## 安装
+
+```bash
+python -m venv .venv
+.\.venv\Scripts\activate          # Windows
+# source .venv/bin/activate       # POSIX
+pip install -r requirements.txt
+python -m camoufox fetch          # 下载 Camoufox 的 patched Firefox 内核
+```
+
+照 `.env.example` 拷一份 `.env` 填上 MySQL 凭证：
+
+```dotenv
+MYSQL_HOST=127.0.0.1
+MYSQL_PORT=3306
+MYSQL_USER=root
+MYSQL_PASSWORD=...
+MYSQL_DATABASE=academic_mcp
+```
+
+库会在第一次启动时自动建库 + 三张表。MySQL 不可达时 Library 会
+明示禁用并打 warning，服务器回退到 passthrough 模式（无缓存 / 无
+共享浏览器状态，但功能本身全部能跑）。
+
+---
+
+## 配置
+
+`mcp_runtime_config.json`（已入仓）放非机密的可调项：
+
+| Key                                   | 类型        | 默认             | 用途                                                                                       |
+| ------------------------------------- | ----------- | --------------- | ------------------------------------------------------------------------------------------ |
+| `playwright_browsers_path`            | string      | `".ms-playwright"` | Playwright 的 Chromium 下载目录。                                                          |
+| `override_playwright_browsers_path`   | bool        | `true`          | 启动时强制 export 该路径，避免 Playwright 用错 Chromium 版本。                                 |
+| `set_cwd_to_project_root`             | bool        | `true`          | 模块导入时 `chdir` 到项目根，避免 MCP server 里相对路径出问题。                                 |
+| `allow_headful_fallback`              | bool        | `false`         | 总开关：遇到反爬封锁时允不允许换 headful 模式人工过验证？                                       |
+| `allow_headful_fallback_platforms`    | list        | `["ACM","SD"]`  | 允许触发 headful 回退的平台子集。                                                            |
+| `manual_verification_timeout_seconds` | int         | `180`           | headful 模式下等用户点完 CAPTCHA 的最长时间（秒）。                                            |
+| `library_enabled`                     | bool        | `true`          | MySQL + 文件系统库的总开关。设 `false` 直接禁缓存。                                            |
+| `library_root`                        | string      | `".repo"`       | PDF/MD/图像的存储根（相对项目根或绝对路径）。                                                  |
+| `library_web_host` / `library_web_port` | string/int | `127.0.0.1:5577` | 管理控制台的监听地址。                                                                      |
+| `profile_suffix`                      | string      | `""`            | 全局共享后缀；可在每个 client 用 `MCP_PROFILE_SUFFIX` 环境变量覆盖（见下）。                    |
+
+机密放 `.env`（gitignored）。目前只有 MySQL 凭证。
+
+---
+
+## MCP 工具
+
+5 个工具全部注册在 FastMCP server（`server.py`）上，docstring 原文
+透传给 LLM。
+
+### `search_papers(query, platform="CNKI", ...)`
+
+| 参数            | 类型           | 描述                                                                                                          |
+| -------------- | ------------- | ------------------------------------------------------------------------------------------------------------- |
+| `query`        | str           | 搜索词。自由文本；可用每平台原生语法（如 IEEE 的 `("Publication Title":"...")`）。                              |
+| `platform`     | str           | `CNKI` / `IEEE` / `ARXIV` / `ACM` / `SD` / `GS` / `PATYEE` / `DAWEI` 之一。                                    |
+| `search_field` | str           | 限定查询字段。每平台口径不同（详见 docstring），默认走该平台的「全部」。                                          |
+| `db_scope`     | str           | CNKI 专用：`总库 / 中文 / 外文`。                                                                                |
+| `source_type`  | str           | 文献类型过滤（research-article / conference / journal / …），每平台口径不同。                                    |
+| `journal`      | str \| None   | 期刊 / 来源限定。服务端结合 URL 级过滤 + 客户端 `venue_matches` 模糊比对（容忍 Google Scholar 的 `…` 截断标记）。 |
+| `start_year`   | int \| None   | 发表年下界（含）。                                                                                              |
+| `end_year`     | int \| None   | 发表年上界（含）。                                                                                              |
+| `sort_by`      | str           | `relevance`（默认）/ `citations` / `date_desc`。                                                                |
+| `start_index`  | int           | 分页偏移；如传 20 跳过前 10–20 条。                                                                              |
+| `limit`        | int           | 返回最多多少条（默认 10）。                                                                                      |
+
+**返回** JSON 字符串：
+
+```json
+{
+  "total_results": "1707",
+  "papers": [
+    {
+      "id": "<detail_link 的 8 位 hex 哈希>",
+      "title": "...",
+      "author": "...",
+      "source": "...",                // 出版社的原始来源行（卷期等）
+      "venue_name": "...",            // 可抽取时给出规范的期刊 / 会议名
+      "doi": "10.1145/...",           // ACM 直接给；其余平台靠 get_paper_details 补
+      "date": "March 2026",
+      "db_type": "Research article",
+      "detail_link": "https://..."
+    }
+  ],
+  "_cache_hit": true                  // 服务端标记，从 MySQL 缓存返回时为 true
+}
+```
+
+缓存 key 是 `(platform, 标准化 query, filters, 分页)`。默认永不过期
+（初版设计时刻意选了永久缓存）。要强制刷新，从 `search_queries` 删
+对应行，或在 web 控制台删。
+
+### `get_paper_details(url, platform="CNKI")`
+
+抓某篇论文的摘要 / 关键词 / DOI。同一篇命中过就走缓存
+（`papers.abstract` 列）。返回：
+
+```json
+{
+  "url": "...",
+  "abstract": "...",
+  "keywords": ["..."],
+  "doi": "...",
+  "_cache_hit": true
+}
+```
+
+`get_paper_details` 已经包了 `goto_with_retry` —— 对瞬时的 Firefox 网
+络中止错误（`NS_ERROR_ABORT`、`NS_ERROR_NET_INTERRUPT` …）会做最多
+2 次指数退避重试再上抛。
+
+副作用：每次成功抓详情都会把 EndNote 可导入的 RIS 记录写到
+`papers.ris_text`（见下方 [RIS 自动入库](#ris-自动入库)）。
+
+### `download_paper(url, output_dir, platform="CNKI")`
+
+下载 PDF。文件已在 `.repo/{平台}/{native_id}/...pdf` 就直接镜像到
+`output_dir`。新下载时同时写入仓库正式位置 **和** 镜像给调用方。
+返回本地文件路径。
+
+SD 走了自定义路径：在导航阶段直接拦截签名后的 S3 PDF URL（而不是
+等不可靠的「点击-下载」事件），所以 DataDome 拦截下的下载现在
+~20 秒能拿到，而不是 60 秒超时。
+
+### `read_paper_content(url, output_dir, platform="CNKI")`
+
+三级缓存：
+
+1. Markdown 已在库中 → 镜像 MD + images/ 到 `output_dir`，立刻返回。
+2. 只有 PDF → 用 `pdf_utils.convert_pdf_to_markdown` 在缓存的 PDF 上
+   重跑一遍。
+3. 全部 miss → 完整抓 + 存 PDF + MD + images，镜像给调用方。
+
+返回 MD 文件路径 + 前 1000 字预览。
+
+### `convert_local_pdf(pdf_path, output_dir)`
+
+独立工具：把用户给的 PDF 走同样的图像提取流水线转成 Markdown。
+不碰 Library。
+
+---
+
+## 论文库（MySQL + 文件系统）
+
+### Schema
+
+```
+papers          (platform, native_id) -> 唯一键
+                title, author, source, venue_name, pub_date, db_type, doi,
+                detail_link, abstract, keywords (json text),
+                pdf_path, md_path, images_dir, extra (json text),
+                ris_text（平台原生导出或合成 RIS），
+                created_at, updated_at
+
+search_queries  (platform, md5(query + filters)) -> 唯一键
+                query_text, filters (json text), total_results,
+                results (json text), fetched_at
+
+browser_state   platform PRIMARY KEY
+                fingerprint（pickled+b64 的 BrowserForge Fingerprint）,
+                cookies（json：Playwright context.cookies()）,
+                user_agent, verified_at, updated_at, note
+```
+
+所有 JSON 形状的列都用 `MEDIUMTEXT`，让 schema 在 MySQL 5.5+ 上一份
+代码跑通。带索引的标识列（`native_id`、`query_hash`）固定 ASCII
+charset，确保在 `utf8mb4` 下也不超 InnoDB 的 767 字节前缀限制。
+
+### 文件系统布局
+
+```
+.repo/
+  ARXIV/2605.16230/
+    arxiv_2605_16230.pdf
+    arxiv_2605_16230.md
+    images/
+      arxiv_2605_16230.pdf-0002-08.png
+      ...
+  IEEE/9266228/
+    ieee_9266228.pdf
+    ieee_9266228.md
+    images/...
+  CNKI/CJFD|...
+```
+
+`native_id` 会做文件系统安全的 slug 化。仓库位置是唯一真相源；
+每次下载都会再镜像一份到调用方指定的 `output_dir`。
+
+### RIS 自动入库
+
+每次成功取到摘要的 `get_paper_details` 调用都会顺手把一份 EndNote
+可导入的 RIS 记录写入 `papers.ris_text`。服务器优先用平台自己的 RIS
+导出接口（页码 / ISSN / 会议名更全），平台没接口或接口失败时回退到
+基于已存元数据的 `ris_utils.synthesize_ris` 合成。无论哪条路径，这
+一列都是幂等写入 —— 命中缓存行不会重抓。
+
+| 平台 | 来源       | 接口 / 策略                                                                                                                                  |
+| ---- | --------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| IEEE | 平台原生   | `/rest/search/citation/format`，失败回落 `/xpl/downloadCitations` 表单 POST。                                                                  |
+| ACM  | 平台原生   | `/action/downloadCitation?format=ris&include=abs`。                                                                                          |
+| SD   | 平台原生   | `/sdfe/arp/cite?format=application/x-research-info-systems` —— 用 `page.evaluate("fetch(url)")` 从浏览器内 JS 上下文发起，让 DataDome 看到的是一次同源 in-app XHR；直接走 `context.request.get` 会被返 403 + 挑战页。 |
+| ARXIV / CNKI / GS / PATYEE / DAWEI | 合成 | `ris_utils.synthesize_ris` 按 db_type + venue_name 推断 `TY`，拆 `AU`，从 `pub_date` 解析 `PY/DA`，并加 `AN  - {platform}:{native_id}` 用于回环。 |
+
+批量导出走 web 控制台：在 `/papers` 按状态过滤，勾选复选框，POST
+到 `/papers/export-ris`。导出过程中若发现某行 `ris_text` 为空
+（例如该平台的合成器是后来才加上的），会当场合成并把结果回写回
+库，下一次导出就走缓存了。
+
+---
+
+## 浏览器状态池（并发 + 复用验证）
+
+Firefox / Camoufox 不允许两个进程同时打开同一个 profile 目录。
+没协调时，开两个 MCP 客户端（比如 Claude Desktop 一个 + Codex 一个）
+要么卡在「Firefox is already running」模态框，要么每个客户端都得
+自己过一遍 CAPTCHA。
+
+浏览器状态池一并解决：
+
+1. **池化 profile 目录**。第一个抢到某平台的 MCP server 用
+   canonical `.<平台>_profile/`。并发的其余 server 会自动落到 per-PID
+   临时副本 `.<平台>_profile__p<pid>/`（`close()` 时连同目录一起清）。
+   一个带 PID 的哨兵文件（`.mcp_owner`）防止崩溃残留把新启动锁死。
+
+2. **固定指纹**。Cloudflare 的 `cf_clearance` 和 DataDome 令牌都
+   绑定浏览器指纹。我们对每个平台只生成一次 `browserforge` Fingerprint
+   （`os="windows"`），pickle+base64 存在 `browser_state.fingerprint`，
+   之后每次 `AsyncCamoufox(fingerprint=...)` 启动都加载同一份。
+   同一平台的所有并发 client 呈现同一身份。
+
+3. **共享 cookies**。过 CAPTCHA / Cloudflare / DataDome 之后，scraper
+   把 `context.cookies()` 抓回 `browser_state.cookies`。下一次启动
+   （任何 client、任何 MCP server 进程）在第一次导航 **之前** 用
+   `context.add_cookies` 注入。一次人工验证覆盖所有 client，直到
+   平台让令牌失效。
+
+`browser_state` 里某一行只要捕获的 cookies 中含已知 clearance cookie
+（`cf_clearance`、`datadome`、`__ddg`、`incap_ses`、`reese84`）就会
+被打上 `verified_at = NOW()`。
+
+### 局限
+
+`cf_clearance` 绑的是 `(IP, fingerprint, TLS JA3)` 三元组。我们能
+固定指纹、本机 IP 不变，但 Camoufox 的 TLS 指纹未必每次启动逐字节
+一致。实际效果是绝大多数启动都能复用上次的验证；偶尔在 Cloudflare
+策略收紧时还会被迫重过一次。但这仍然远好于不修的状态（每个 client
+每次重启都要人工过验证）。
+
+### Web 控制台路由
+
+| URL                                       | 用途                                                                              |
+| ----------------------------------------- | -------------------------------------------------------------------------------- |
+| `/`                                       | 各平台计数 + 总计。                                                                |
+| `/papers`                                 | 分页列表，含平台 / 关键词 / 状态过滤。可勾选行 POST 到 `/papers/export-ris` 批量下载 `.ris`。 |
+| `/papers/{platform}/{native_id}`          | 完整元数据 + 摘要 + 已存 PDF / Markdown 链接。                                       |
+| `/searches`                               | 已缓存的搜索请求；逐行删除强制重抓。                                                 |
+| `/browser-state`                          | 每平台的指纹 / cookies / 验证状态；支持「清 Cookie」/「完全重置」。                      |
+| `/file?path=...`                          | `.repo/` 下的静态文件服务，会拒绝路径穿越尝试。                                       |
+| `/health`                                 | JSON：`{enabled, reason, library_root}`。                                         |
+
+---
+
+## 运行
+
+### MCP server（生产）
+
+把 server 接进 MCP 客户端的配置。Claude Desktop 的 `mcp.json`
+（Codex 的对应文件类似）：
+
+```jsonc
+{
+  "academic-mcp": {
+    "command": "E:\\Projects\\CNKI-MCP\\.venv\\Scripts\\python.exe",
+    "args": ["E:\\Projects\\CNKI-MCP\\server.py"],
+    "env": {
+      "MCP_PROFILE_SUFFIX": "claude"
+    }
+  }
+}
+```
+
+`MCP_PROFILE_SUFFIX` 是 **可选** 的。不设 → 走默认行为（一份
+canonical profile，第二个 client 自动 per-PID 回退）。每个 client
+设成不同的值 → 各拿一套独立 profile（如 `.ieee_profile_claude` /
+`.ieee_profile_codex`）。DB 里的 browser state 不管这个后缀都共享。
+
+### MCP server（独立运行，调试用）
+
+```bash
+.\.venv\Scripts\python.exe server.py
+```
+
+server 通过 stdio 讲 MCP，所以裸跑会一直卡着等 JSON-RPC 输入。
+只有从 MCP 客户端连进来才有意义。
+
+### 管理控制台
+
+```bat
+library_web_start.bat   :: 在配置的端口起 uvicorn，自动开浏览器
+library_web_stop.bat    :: 杀掉该端口上的进程
+```
+
+PowerShell 版本（`library_web_start.ps1` / `library_web_stop.ps1`）
+也有。控制台读写都开（能删缓存行 / 清浏览器状态），默认只绑
+`127.0.0.1`；真要远程访问改 `mcp_runtime_config.json` 里的
+`library_web_host`。
+
+---
+
+## 多客户端使用指南
+
+| 场景                                              | 实际发生什么                                                                         | 你该做什么                       |
+| ------------------------------------------------ | --------------------------------------------------------------------------------- | ------------------------------ |
+| 一次只开一个 MCP client                            | 用 canonical profile、完整缓存，每个平台每个令牌 TTL 周期内只过一次 CAPTCHA。            | 啥都不用。                       |
+| 两个 client、同一平台、同一时间                      | 第一个抢到 canonical profile，第二个用 per-PID 临时副本。两个共享 cookies。              | 啥都不用。                       |
+| 两个 client、想要完全隔离的 profile                  | 给两个 client 分别设 `MCP_PROFILE_SUFFIX=claude` / `MCP_PROFILE_SUFFIX=codex`。       | 改 MCP client 配置文件。           |
+| CAPTCHA 出现、你过了一次                            | cookies 已抓回 `browser_state`；之后的启动会注入它们跳过挑战。                          | 啥都不用。                       |
+| 平台直接封了这个指纹                                | 所有 client 同时挂（因为身份一致）。                                                  | `/browser-state` 点「完全重置」。    |
+| 只是想清掉过期 cookies                              | `verified_at` 会显示陈旧，新搜索可能再走一遍人工路径。                                   | `/browser-state` 点「清 Cookie」。  |
+
+---
+
+## 故障排除
+
+| 现象                                                                  | 可能原因                                                            | 修复                                                                                                                  |
+| -------------------------------------------------------------------- | ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------- |
+| Camoufox `Failed to launch the browser process / exitCode=0`         | 上次崩溃在 profile 里留了 `parent.lock`。                              | 下次启动 `scraper_utils.acquire_profile` 会自动清。再卡死就手删 `.<平台>_profile/parent.lock`。                              |
+| `TargetClosedError: Target page, context or browser has been closed` | Cloudflare 超时把 persistent context 卡死了。                          | 已自处理：`_context_is_alive` 检测到后下次调用前重建。频繁出现就重启 MCP server。                                                |
+| `ProfileInUseError: ... already in use by another MCP server`        | 第二个 client 想抢的 profile 被另一个 **活的** PID 占着。                | 关掉另一个 client，或者给当前 client 设个不一样的 `MCP_PROFILE_SUFFIX`。                                                       |
+| SD `Timed out (60s) waiting for PDF download or stream navigation`   | DataDome 给你返了 HTML 不是 PDF 流。                                  | 错误消息现已带 asset URL + viewer state。先在 headful 模式过一遍 CAPTCHA，重试时 cookies 自动接续。                            |
+| `_cache_hit=true` 但结果一看就陈旧                                     | 永久搜索缓存返回了一条化石。                                            | `/searches` 删掉该行，重新搜。                                                                                            |
+| CNKI 上 `journal=` 过滤返 0 结果                                       | CNKI 的相关性排序未必把目标期刊塞进第 1 页。                              | 加大 `limit`、把 query 改得更具体，或接受 CNKI 在跨期刊覆盖上对宽 query 稀疏的事实。                                            |
+| 启动时 Library 被禁（`[Library] Disabled: ...`）                       | MySQL 配置缺失 / 错误 / 不可达。                                       | 检查 `.env`。服务器仍跑 passthrough 模式，只是缓存和共享状态关掉了。                                                          |
+
+---
+
+## 项目约定
+
+- `scratch/` 已 git-ignore。调试脚本、抓回的 HTML、截图都放这。
+- `.{platform}_profile/`、`.repo/`、`.venv/`、`.env` 全部 git-ignore。
+- 各 `*_scraper.py` 模块导出一个 `scraper_instance` 单例
+  （`server.py` 直接 import），用以让每个平台在 MCP server 进程内
+  持有一份长寿命的 Camoufox/Chromium context。
+- 每平台原生 ID（论文库主键的身份依据）：
+    - `ARXIV`：`2605.16230`（arXiv ID，带 version 后缀就保留）
+    - `IEEE`： `9266228`（`/document/<n>/` 里的 arnumber）
+    - `ACM`：  `10.1145/3597503.3608128`（DOI，直接从 `/doi/...` 解）
+    - `SD`：   `S0263224125035523`（PII）
+    - `CNKI`： `DBCODE|FileName`
+    - `GS`：   原始结果 URL 的 SHA1（外站链接 → 哈希后用）
+    - `PATYEE`：`pn=` 参数值
+    - `DAWEI`： `PNM`（公开号）
+
+---
+
+## License
+
+见仓库根目录。
