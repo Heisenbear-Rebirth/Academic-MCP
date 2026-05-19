@@ -9,20 +9,29 @@
     <option value="{{ opt }}" {% if platform == opt %}selected{% endif %}>{{ opt }}</option>
     {% endfor %}
   </select>
+  <select name="state" title="按状态过滤 — 全部 / 仅搜索 / 已抓详情 / 已下载 PDF / 已生成 MD / 已抓 RIS">
+    {% for value, label in state_options %}
+    <option value="{{ value }}" {% if state == value %}selected{% endif %}>{{ label }}</option>
+    {% endfor %}
+  </select>
   <button type="submit" class="primary">筛选</button>
   <a class="btn" href="/papers">重置</a>
   <span style="margin-left:auto;" class="muted">{{ total }} 条结果</span>
 </form>
 
+<form method="post" action="/papers/export-ris" id="ris-export-form">
 <div class="card" style="padding:0;">
   <table>
     <thead>
       <tr>
+        <th style="width:36px;">
+          <input type="checkbox" id="select-all" title="选中本页全部" />
+        </th>
         <th>平台</th>
         <th>标题</th>
         <th>作者</th>
         <th>日期</th>
-        <th>文件</th>
+        <th>状态</th>
         <th>更新时间</th>
         <th></th>
       </tr>
@@ -30,32 +39,73 @@
     <tbody>
       {% for r in rows %}
       <tr>
+        <td>
+          {% if r.has_abstract or r.pdf_path or r.md_path %}
+            <input type="checkbox" name="paper_id" value="{{ r.id }}" class="export-cb" />
+          {% else %}
+            <span class="muted" title="无摘要的纯搜索结果不支持导出 RIS">—</span>
+          {% endif %}
+        </td>
         <td><span class="pill platform">{{ r.platform }}</span></td>
         <td class="title-cell">
           <a href="/papers/{{ r.platform }}/{{ r.native_id }}">{{ r.title or "(无标题)" }}</a>
-          <div class="muted">{{ r.native_id }}</div>
+          <div class="muted">{{ r.native_id }}{% if r.doi %} · DOI {{ r.doi }}{% endif %}</div>
         </td>
         <td>{{ r.author or "—" }}</td>
         <td>{{ r.pub_date or "—" }}</td>
         <td>
-          {% if r.pdf_path %}<span class="pill has-file">PDF</span>{% else %}<span class="pill no-file">PDF</span>{% endif %}
-          {% if r.md_path %}<span class="pill has-file">MD</span>{% else %}<span class="pill no-file">MD</span>{% endif %}
+          {% if r.has_abstract %}<span class="pill has-file" title="get_paper_details 已抓">摘要</span>{% endif %}
+          {% if r.pdf_path %}<span class="pill has-file">PDF</span>{% endif %}
+          {% if r.md_path %}<span class="pill has-file">MD</span>{% endif %}
+          {% if r.has_ris %}<span class="pill has-file">RIS</span>{% endif %}
+          {% if not r.has_abstract and not r.pdf_path and not r.md_path %}<span class="pill no-file">仅索引</span>{% endif %}
         </td>
         <td class="muted">{{ r.updated_at }}</td>
         <td><a class="btn" href="/papers/{{ r.platform }}/{{ r.native_id }}">详情</a></td>
       </tr>
       {% else %}
-      <tr><td colspan="7" class="muted" style="text-align:center;padding:24px;">没有匹配的论文。</td></tr>
+      <tr><td colspan="8" class="muted" style="text-align:center;padding:24px;">没有匹配的论文。</td></tr>
       {% endfor %}
     </tbody>
   </table>
 </div>
 
+<div class="actions" style="margin-top:12px;align-items:center;">
+  <span class="muted" id="selection-summary">已选 0 篇</span>
+  <button type="submit" class="primary" id="export-btn" disabled>导出选中为 RIS</button>
+  <span class="muted" style="font-size:12px;">
+    EndNote 可直接「Import &gt; File &gt; Reference Manager (RIS)」导入。
+  </span>
+</div>
+</form>
+
 {% if total_pages > 1 %}
 <div class="pagination">
-  {% if page > 1 %}<a class="btn" href="/papers?{{ qs(platform=platform, q=q, page=page-1, page_size=page_size) }}">← 上一页</a>{% endif %}
+  {% if page > 1 %}<a class="btn" href="/papers?{{ qs(platform=platform, q=q, state=state, page=page-1, page_size=page_size) }}">← 上一页</a>{% endif %}
   <span class="page-info">第 {{ page }} / {{ total_pages }} 页</span>
-  {% if page < total_pages %}<a class="btn" href="/papers?{{ qs(platform=platform, q=q, page=page+1, page_size=page_size) }}">下一页 →</a>{% endif %}
+  {% if page < total_pages %}<a class="btn" href="/papers?{{ qs(platform=platform, q=q, state=state, page=page+1, page_size=page_size) }}">下一页 →</a>{% endif %}
 </div>
 {% endif %}
+
+<script>
+(function() {
+  const cbs = () => Array.from(document.querySelectorAll('.export-cb'));
+  const sumEl = document.getElementById('selection-summary');
+  const btn = document.getElementById('export-btn');
+  const selAll = document.getElementById('select-all');
+  function refresh() {
+    const checked = cbs().filter(c => c.checked).length;
+    sumEl.textContent = '已选 ' + checked + ' 篇';
+    btn.disabled = checked === 0;
+    if (selAll) selAll.checked = checked > 0 && checked === cbs().length;
+  }
+  cbs().forEach(c => c.addEventListener('change', refresh));
+  if (selAll) selAll.addEventListener('change', () => {
+    const v = selAll.checked;
+    cbs().forEach(c => { c.checked = v; });
+    refresh();
+  });
+  refresh();
+})();
+</script>
 {% endblock %}

@@ -472,4 +472,73 @@ class IEEEScraper:
         except Exception as e:
             return f"PDF downloaded to {pdf_path} but Markdown conversion failed: {str(e)}"
 
+    async def fetch_ris(self, detail_url: str) -> str:
+        """Pull an IEEE-formatted RIS via their citation export REST endpoint.
+
+        Returns the RIS body on success or empty string on any failure --
+        the caller falls back to local synthesis. Uses the scraper's already
+        warmed-up Playwright APIRequestContext so existing cookies / referer
+        propagate naturally.
+        """
+        m = re.search(r"/document/(\d+)", detail_url)
+        if not m:
+            return ""
+        arnumber = m.group(1)
+        if not self.page:
+            await self.initialize()
+        endpoints = [
+            (
+                "https://ieeexplore.ieee.org/rest/search/citation/format",
+                "json",
+                {
+                    "recordIds": [arnumber],
+                    "download-format": "download-ris",
+                    "citations-format": "citation-abstract",
+                },
+            ),
+            (
+                "https://ieeexplore.ieee.org/xpl/downloadCitations",
+                "form",
+                {
+                    "recordIds": arnumber,
+                    "download-format": "download-ris",
+                    "citations-format": "citation-abstract",
+                    "x": "1",
+                },
+            ),
+        ]
+        for url, kind, payload in endpoints:
+            try:
+                if kind == "json":
+                    resp = await self.context.request.post(
+                        url,
+                        data=payload,
+                        headers={"Referer": detail_url, "Origin": "https://ieeexplore.ieee.org"},
+                        timeout=30000,
+                    )
+                else:
+                    resp = await self.context.request.post(
+                        url,
+                        form=payload,
+                        headers={"Referer": detail_url, "Origin": "https://ieeexplore.ieee.org"},
+                        timeout=30000,
+                    )
+                if resp.status != 200:
+                    continue
+                body = await resp.text()
+                # JSON endpoint wraps the RIS payload in {"data":"TY  - ..."}.
+                if body.lstrip().startswith("{"):
+                    import json as _json
+                    try:
+                        data = _json.loads(body).get("data", "")
+                    except Exception:
+                        data = ""
+                    body = data or body
+                if "TY  - " in body and "ER" in body:
+                    return body.replace("\r\n", "\n").strip()
+            except Exception as e:
+                print(f"[IEEE] fetch_ris via {url[:60]} failed: {e}")
+        return ""
+
+
 scraper_instance = IEEEScraper()

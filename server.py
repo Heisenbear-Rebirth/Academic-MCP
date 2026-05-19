@@ -165,6 +165,29 @@ async def get_paper_details(url: str, platform: str = "CNKI") -> str:
             )
         except Exception as e:
             print(f"[Library] upsert after details failed: {e}")
+        # Once we have abstract+metadata we have enough for a RIS record.
+        # Prefer the platform's native export (richer pagination / ISSN);
+        # synthesize from our stored fields if the platform doesn't expose
+        # one or the network call fails.
+        try:
+            existing_ris = await asyncio.to_thread(lib.get_paper_ris, norm, native_id)
+            if not existing_ris:
+                ris_text = None
+                fetch_fn = getattr(scraper, "fetch_ris", None)
+                if callable(fetch_fn):
+                    try:
+                        ris_text = await fetch_fn(url)
+                    except Exception as e:
+                        print(f"[RIS] {norm} fetch_ris raised: {e}")
+                if not ris_text:
+                    row = await asyncio.to_thread(lib.get_paper, norm, native_id)
+                    if row:
+                        from ris_utils import synthesize_ris
+                        ris_text = synthesize_ris(row)
+                if ris_text:
+                    await asyncio.to_thread(lib.set_paper_ris, norm, native_id, ris_text)
+        except Exception as e:
+            print(f"[RIS] auto-store failed for {norm}/{native_id}: {e}")
     return json.dumps(details, ensure_ascii=False, indent=2)
 
 

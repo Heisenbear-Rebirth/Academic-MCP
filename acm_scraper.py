@@ -528,4 +528,32 @@ class ACMScraper:
         except Exception as e:
             return f"PDF downloaded to {pdf_path} but Markdown conversion failed: {str(e)}"
 
+    async def fetch_ris(self, detail_url: str) -> str:
+        """ACM Digital Library serves RIS via /action/downloadCitation."""
+        m = re.search(r"/doi/(?:abs/|full/|pdf/)?(10\.[^/?#]+/[^/?#]+)", detail_url)
+        if not m:
+            return ""
+        doi = m.group(1)
+        await self._ensure_browser()
+        url = (
+            "https://dl.acm.org/action/downloadCitation"
+            f"?doi={urllib.parse.quote(doi, safe='')}"
+            "&format=ris&include=abs&direct=true"
+        )
+        try:
+            resp = await self.context.request.get(
+                url,
+                headers={"Referer": detail_url, "Accept": "application/x-research-info-systems,*/*"},
+                timeout=30000,
+            )
+            if resp.status != 200:
+                return ""
+            body = (await resp.text()).replace("\r\n", "\n").strip()
+            if "TY  - " in body and "ER" in body:
+                return body
+        except Exception as e:
+            print(f"[ACM] fetch_ris failed: {e}")
+        return ""
+
+
 scraper_instance = ACMScraper()

@@ -36,6 +36,10 @@ tmp/
 .dawei_profile/
 .patyee_profile/
 .test_profile*/
+# Ephemeral per-PID profile copies created by pooled_profile when a canonical
+# profile is held by another live MCP server. Auto-deleted on close(); ignored
+# in case a crash leaves one behind.
+.*_profile__p*/
 .playwright-mcp/
 .ms-playwright/
 

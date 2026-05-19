@@ -680,4 +680,31 @@ class ScienceDirectScraper:
         except Exception as e:
             return f"PDF downloaded to {pdf_path} but Markdown conversion failed: {str(e)}"
 
+    async def fetch_ris(self, detail_url: str) -> str:
+        """ScienceDirect: their public sdfe/arp/cite endpoint serves RIS."""
+        m = re.search(r"/pii/([A-Za-z0-9]+)", detail_url)
+        if not m:
+            return ""
+        pii = m.group(1)
+        await self._ensure_browser()
+        url = (
+            "https://www.sciencedirect.com/sdfe/arp/cite"
+            f"?pii={pii}&format=application/x-research-info-systems&withabstract=true"
+        )
+        try:
+            resp = await self.context.request.get(
+                url,
+                headers={"Referer": detail_url, "Accept": "application/x-research-info-systems,*/*"},
+                timeout=30000,
+            )
+            if resp.status != 200:
+                return ""
+            body = (await resp.text()).replace("\r\n", "\n").strip()
+            if "TY  - " in body and "ER" in body:
+                return body
+        except Exception as e:
+            print(f"[SD] fetch_ris failed: {e}")
+        return ""
+
+
 scraper_instance = ScienceDirectScraper()

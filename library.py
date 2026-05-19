@@ -247,18 +247,23 @@ class Library:
                         md_path VARCHAR(512),
                         images_dir VARCHAR(512),
                         extra MEDIUMTEXT,
+                        ris_text MEDIUMTEXT,
                         created_at DATETIME NULL,
                         updated_at DATETIME NULL,
                         UNIQUE KEY uniq_platform_native (platform, native_id)
                     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
                     """
                 )
-                # Defensive migration for installations that pre-date the venue_name column.
-                try:
-                    cur.execute("ALTER TABLE papers ADD COLUMN venue_name VARCHAR(512) AFTER source")
-                except pymysql.err.OperationalError as e:
-                    if e.args[0] != 1060:  # 1060 = Duplicate column name (already migrated)
-                        raise
+                # Defensive migrations for installations that pre-date later columns.
+                for ddl in (
+                    "ALTER TABLE papers ADD COLUMN venue_name VARCHAR(512) AFTER source",
+                    "ALTER TABLE papers ADD COLUMN ris_text MEDIUMTEXT AFTER extra",
+                ):
+                    try:
+                        cur.execute(ddl)
+                    except pymysql.err.OperationalError as e:
+                        if e.args[0] != 1060:  # 1060 = Duplicate column name (already migrated)
+                            raise
                 cur.execute(
                     """
                     CREATE TABLE IF NOT EXISTS search_queries (
@@ -409,7 +414,7 @@ class Library:
     _PAPER_COLS = (
         "title", "author", "source", "venue_name", "pub_date", "db_type", "doi",
         "detail_link", "abstract", "keywords", "pdf_path", "md_path",
-        "images_dir", "extra",
+        "images_dir", "extra", "ris_text",
     )
 
     def upsert_paper(self, platform: str, native_id: str, **fields: Any) -> None:
@@ -524,10 +529,21 @@ class Library:
             "totals": {"papers": papers_total, "searches": searches_total},
         }
 
+    # Recognised values for the ``state`` filter on :meth:`list_papers`.
+    # Each maps to a SQL fragment that selects the matching papers.
+    _STATE_FILTERS = {
+        "search_only": "(abstract IS NULL OR abstract='') AND (pdf_path IS NULL OR pdf_path='')",
+        "with_abstract": "(abstract IS NOT NULL AND abstract<>'')",
+        "with_pdf": "(pdf_path IS NOT NULL AND pdf_path<>'')",
+        "with_md": "(md_path IS NOT NULL AND md_path<>'')",
+        "with_ris": "(ris_text IS NOT NULL AND ris_text<>'')",
+    }
+
     def list_papers(
         self,
         platform: Optional[str] = None,
         keyword: Optional[str] = None,
+        state: Optional[str] = None,
         page: int = 1,
         page_size: int = 30,
     ) -> Dict[str, Any]:
@@ -541,6 +557,9 @@ class Library:
             where.append("(title LIKE %s OR author LIKE %s OR native_id LIKE %s)")
             like = f"%{keyword}%"
             params.extend([like, like, like])
+        state_sql = self._STATE_FILTERS.get((state or "").strip())
+        if state_sql:
+            where.append(state_sql)
         clause = ("WHERE " + " AND ".join(where)) if where else ""
         offset = max(0, (page - 1) * page_size)
         with self._connect() as conn:
@@ -549,12 +568,57 @@ class Library:
                 total = cur.fetchone()["c"]
                 cur.execute(
                     f"SELECT id, platform, native_id, title, author, pub_date, db_type, "
-                    f"pdf_path, md_path, detail_link, updated_at FROM papers {clause} "
+                    f"abstract, doi, venue_name, pdf_path, md_path, ris_text, detail_link, "
+                    f"updated_at FROM papers {clause} "
                     f"ORDER BY updated_at DESC LIMIT %s OFFSET %s",
                     [*params, page_size, offset],
                 )
-                rows = [dict(r) for r in cur.fetchall()]
+                rows = []
+                for r in cur.fetchall():
+                    row = dict(r)
+                    # Flag columns make templating concise without leaking blob payloads.
+                    row["has_abstract"] = bool((row.get("abstract") or "").strip())
+                    row["has_ris"] = bool((row.pop("ris_text", None) or "").strip())
+                    rows.append(row)
         return {"rows": rows, "total": total, "page": page, "page_size": page_size}
+
+    def get_paper_ris(self, platform: str, native_id: str) -> Optional[str]:
+        if not self.enabled or not native_id:
+            return None
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT ris_text FROM papers WHERE platform=%s AND native_id=%s LIMIT 1",
+                    ((platform or "").upper(), native_id),
+                )
+                row = cur.fetchone()
+        return (row or {}).get("ris_text")
+
+    def set_paper_ris(self, platform: str, native_id: str, ris_text: str) -> bool:
+        if not self.enabled or not native_id or not ris_text:
+            return False
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "UPDATE papers SET ris_text=%s, updated_at=NOW() "
+                    "WHERE platform=%s AND native_id=%s",
+                    (ris_text, (platform or "").upper(), native_id),
+                )
+                return cur.rowcount > 0
+
+    def fetch_papers_for_export(self, paper_ids: List[int]) -> List[Dict[str, Any]]:
+        """Pull full rows (including ris_text + abstract) for a batch of paper PKs."""
+        if not self.enabled or not paper_ids:
+            return []
+        placeholders = ",".join(["%s"] * len(paper_ids))
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"SELECT * FROM papers WHERE id IN ({placeholders}) ORDER BY platform, updated_at DESC",
+                    paper_ids,
+                )
+                rows = [self._row_to_paper(r) for r in cur.fetchall()]
+        return rows
 
     def list_searches(self, page: int = 1, page_size: int = 30) -> Dict[str, Any]:
         if not self.enabled:

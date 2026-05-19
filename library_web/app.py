@@ -11,8 +11,8 @@ from pathlib import Path
 from typing import Optional
 from urllib.parse import urlencode
 
-from fastapi import FastAPI, HTTPException, Query, Request
-from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
+from fastapi import FastAPI, Form, HTTPException, Query, Request
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -67,11 +67,22 @@ def dashboard(request: Request):
     return _render("dashboard.html", request, stats=stats)
 
 
+_STATE_OPTIONS = [
+    ("", "全部"),
+    ("search_only", "仅搜索结果（无摘要）"),
+    ("with_abstract", "已抓详情（有摘要）"),
+    ("with_pdf", "已下载 PDF"),
+    ("with_md", "已生成 Markdown"),
+    ("with_ris", "已抓 RIS"),
+]
+
+
 @app.get("/papers", response_class=HTMLResponse)
 def papers_list(
     request: Request,
     platform: str = Query("", description="filter by platform"),
     q: str = Query("", description="title/author/native_id substring"),
+    state: str = Query("", description="search_only / with_abstract / with_pdf / with_md / with_ris"),
     page: int = Query(1, ge=1),
     page_size: int = Query(30, ge=5, le=200),
 ):
@@ -79,6 +90,7 @@ def papers_list(
     result = lib.list_papers(
         platform=platform or None,
         keyword=q or None,
+        state=state or None,
         page=page,
         page_size=page_size,
     )
@@ -87,7 +99,47 @@ def papers_list(
         "papers.html", request,
         rows=result["rows"], total=result["total"],
         page=page, page_size=page_size, total_pages=total_pages,
-        platform=platform, q=q,
+        platform=platform, q=q, state=state,
+        state_options=_STATE_OPTIONS,
+    )
+
+
+@app.post("/papers/export-ris")
+async def papers_export_ris(request: Request):
+    """Build a concatenated RIS file from a list of selected paper PKs.
+    Missing ``ris_text`` rows are synthesized on the fly from stored
+    metadata so the export never returns a half-empty file."""
+    form = await request.form()
+    raw_ids = form.getlist("paper_id")
+    ids: list[int] = []
+    for raw in raw_ids:
+        try:
+            ids.append(int(raw))
+        except Exception:
+            continue
+    if not ids:
+        raise HTTPException(status_code=400, detail="No papers selected")
+    lib = get_library()
+    rows = lib.fetch_papers_for_export(ids)
+    if not rows:
+        raise HTTPException(status_code=404, detail="No matching papers found")
+    from ris_utils import synthesize_ris, concatenate_ris
+    ris_records = []
+    for row in rows:
+        ris = (row.get("ris_text") or "").strip()
+        if not ris:
+            ris = synthesize_ris(row)
+            try:
+                lib.set_paper_ris(row["platform"], row["native_id"], ris)
+            except Exception:
+                pass
+        ris_records.append(ris)
+    body = concatenate_ris(ris_records)
+    filename = f"academic-library-{len(rows)}-papers.ris"
+    return Response(
+        content=body,
+        media_type="application/x-research-info-systems",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 
 
