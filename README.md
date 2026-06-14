@@ -229,10 +229,16 @@ Downloads the PDF. If the file is already on disk under
 On a fresh download, it is written into the canonical location AND
 mirrored to `output_dir`. Returns the local filesystem path.
 
-SD has a custom path that intercepts the signed S3 PDF URL during
-navigation (rather than waiting for an unreliable click-then-download
-event), so DataDome-shielded downloads now resolve in ~20 s instead of
-timing out at 60 s.
+ACM and SD now prefer request-level retrieval once a verified browser
+session exists. ACM tries the DOI PDF endpoint with verified cookies and
+classifies papers whose detail page exposes no PDF link as unavailable
+rather than failed.
+
+SD search/details use direct HTTP where possible; PDF download navigates
+only far enough to obtain/trigger the signed ScienceDirect asset URL, then
+saves the PDF through programmatic download/body capture. After the PDF
+host challenge has been solved once in the visible browser, fresh SD PDFs
+typically save in a few seconds instead of timing out in the viewer.
 
 ### `read_paper_content(url, output_dir, platform="CNKI")`
 
@@ -450,6 +456,26 @@ PowerShell equivalents (`library_web_start.ps1` /
 
 ---
 
+## Validation snapshot
+
+Latest cold-result smoke run: `scratch/full_platform_test.py`,
+run id `20260614_full_final`, 3 download attempts per platform where
+downloads apply. Hard failures: **0**. Unavailable rows are publisher or
+tool semantics, not scraper exceptions.
+
+| Platform | Search | Details | Download result | Read result |
+| -------- | ------: | ------: | --------------- | ----------- |
+| `ARXIV`  | 6.584 s | 4.976 s | 3/3 OK: 15.065, 12.841, 10.203 s | success, 20.405 s |
+| `CNKI`   | 1.587 s | 0.198 s | 3/3 OK: 1.488, 1.479, 1.325 s | success, 2.178 s |
+| `IEEE`   | 4.165 s | 1.149 s | 3/3 OK: 29.498, 8.352, 2.809 s | success, 36.236 s |
+| `ACM`    | 25.385 s | 3.034 s | 3/3 unavailable: tested articles expose no PDF link | unavailable |
+| `SD`     | 15.312 s | 4.913 s | 3/3 OK: 4.835, 5.381, 3.819 s | success, 22.149 s |
+| `GS`     | 2.443 s | 0.000 s | not applicable / unavailable by design | not applicable |
+| `PATYEE` | 1.695 s | 0.374 s | 1/3 OK, 2/3 unavailable | success, 8.778 s |
+| `DAWEI`  | 2.551 s | 0.755 s | 3/3 OK: 3.115, 3.284, 2.598 s | success, 4.768 s |
+
+---
+
 ## Troubleshooting
 
 | Symptom                                                              | Likely cause                                                          | Fix                                                                                                                |
@@ -457,7 +483,8 @@ PowerShell equivalents (`library_web_start.ps1` /
 | `Failed to launch the browser process / exitCode=0` on Camoufox      | Stale `parent.lock` in profile dir from a crashed previous run.       | Auto-cleaned on next launch by `scraper_utils.acquire_profile`. If still stuck, delete `.<platform>_profile/parent.lock`. |
 | `TargetClosedError: Target page, context or browser has been closed` | Cloudflare timeout left the persistent context wedged.                | Auto-handled: `_context_is_alive` detects and rebuilds on next call. If repeated, restart the MCP server.          |
 | `ProfileInUseError: ... already in use by another MCP server`        | A second client tried to claim a profile already held by a *live* PID. | Either close the other client or set `MCP_PROFILE_SUFFIX` to a different value in this client's env.               |
-| SD `Timed out (60s) waiting for PDF download or stream navigation`   | DataDome served HTML instead of the PDF stream.                       | Error message now reports the asset URL + viewer state. Solve the CAPTCHA in headful mode, then retry — cookies will carry. |
+| SD PDF page is visible but no file is saved                           | Firefox opened the PDF internally instead of emitting a download.     | Auto-handled: the SD profile forces `application/pdf` to save-to-disk and the scraper captures the download event. |
+| ACM download returns unavailable                                      | The article page and `/doi/pdf/...` endpoint redirect to abstract HTML with no PDF link. | Treated as publisher-unavailable, not a scraper failure. Try a different ACM article/DOI.                         |
 | `_cache_hit=true` but the result looks stale                         | Permanent search cache returned a fossil row.                         | `/searches` → delete the row, re-run the search.                                                                   |
 | `journal=` filter returned 0 results on CNKI                         | CNKI relevance ordering may not surface the target journal in page 1. | Increase `limit`, narrow the query, or accept that CNKI's cross-journal coverage is sparse for general queries.    |
 | Library disabled at startup (`[Library] Disabled: ...`)              | MySQL config missing / wrong / unreachable.                           | Check `.env`. The server still runs in passthrough mode — caching and shared state are just turned off.            |
@@ -468,7 +495,8 @@ PowerShell equivalents (`library_web_start.ps1` /
 
 - `scratch/` is git-ignored. Debug scripts, dump HTML, screenshots, etc.
   belong there.
-- `.{platform}_profile/`, `.repo/`, `.venv/`, `.env` are all git-ignored.
+- `.{platform}_profile/`, suffixed profile dirs such as
+  `.sd_profile_codex/`, `.repo/`, `.venv/`, `.env` are all git-ignored.
 - The `*_scraper.py` modules export a `scraper_instance` singleton
   (`server.py` imports those directly) so we keep a long-lived
   Camoufox/Chromium context per platform per MCP server process.

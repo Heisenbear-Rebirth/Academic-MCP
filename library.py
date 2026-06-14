@@ -869,6 +869,13 @@ class Library:
                 native_id = extract_native_id(platform, paper.get("detail_link") or "")
                 if not native_id:
                     continue
+                # Forward per-platform "extra" hints (e.g. GS cluster_id needed
+                # later by gs_scraper.fetch_ris). The upsert layer JSON-encodes
+                # dicts for the extra column; passing None / empty dict skips.
+                extra = None
+                gs_cid = paper.get("_gs_cluster_id")
+                if gs_cid:
+                    extra = {"gs_cluster_id": gs_cid}
                 await asyncio.to_thread(
                     self.upsert_paper,
                     platform,
@@ -882,6 +889,7 @@ class Library:
                     doi=paper.get("doi"),
                     detail_link=paper.get("detail_link"),
                     abstract=paper.get("_abstract"),
+                    extra=extra,
                 )
         except Exception as e:
             print(f"[Library] Failed to persist search cache: {e}")

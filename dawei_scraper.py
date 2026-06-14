@@ -5,6 +5,7 @@ import json
 import os
 import re
 import sys
+import uuid
 from mcp_logging import safe_stderr_print
 import urllib.parse
 from typing import Dict, Optional
@@ -21,6 +22,22 @@ ensure_runtime_environment()
 class DaweiScraper:
     BASE_URL = "https://pat.daweisoft.com"
     SEARCH_API = "**/api/innojoy-search/api/v1/patent/search"
+    SEARCH_API_URL = f"{BASE_URL}/api/innojoy-search/api/v1/patent/search"
+    IP_LOGIN_URL = f"{BASE_URL}/api/api/v1/user/ipLogin"
+    USER_AGENT = (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36"
+    )
+    SEARCH_FIELDS = "PTS,DPIStar,PNM,TI,AD,GD,AN,INN,CAS,PA_O,CLS,AT,CC,MY_COLLECTION"
+    DETAIL_FIELDS = (
+        "AT,DPIStar,TI,AN,AD,PD,PLD,PNM,PA_J,PACST,CASCST,FSN,FIN,CAS_J,INN_J,"
+        "AR,CASAR,PR,PRN,EPRD,TOC,EPRCC,IAN,IPN,ISD,AGC_J,AGT_J,CO,IPC_L,LOC,"
+        "AB,CPC_L,CC,DRWN,DB,ExamAN,PTS,ABST_IMG,DRW_IMG,PCT,IAN,RAN,KV,GD,ED,"
+        "PRCC,GBC,EINDC,CN,PNDE,FSCN,RBN,YYLICN,YYTRAN,YYPLEN,AW,AWY,O3,INVN,"
+        "RPN,FIN,FICN,ICN,CWN,UC,EC,JFIC,JFTC,IPCDEC,IPCGLCC,EXAMAN,MY_COLLECTION,"
+        "BENEFIT_PHR,STDT,STDN,STDPA,STDD,EXM,CLS,FLD_2,AI_MARK_IDENT,STD_ALL,"
+        "HGBA,STD,PA_ALL_NAME,INN_ALL_NAME,CAS_ALL_NAME"
+    )
 
     SOURCE_TYPE_MAP = {
         "\u53d1\u660e\u7533\u8bf7": "fmsq",
@@ -34,6 +51,8 @@ class DaweiScraper:
         self.playwright = None
         self.context = None
         self.page = None
+        self._api_token = None
+        self._api_device_id = None
         from runtime_config import profile_path
         self.profile_dir = profile_path(".dawei_profile")
 
@@ -133,6 +152,111 @@ class DaweiScraper:
         mapped = self.SOURCE_TYPE_MAP.get(str(source_type).strip())
         return [mapped] if mapped else ["fmzl", "fmsq", "xx", "wg"]
 
+    def _api_headers(self, referer: str = None, *, json_content: bool = True) -> dict:
+        headers = {
+            "Accept": "application/json, text/plain, */*",
+            "User-Agent": self.USER_AGENT,
+            "Referer": referer or f"{self.BASE_URL}/index",
+            "Origin": self.BASE_URL,
+            "x-group-env": "PAT",
+            "deviceId": self._api_device_id or "",
+        }
+        if self._api_token:
+            headers["token"] = self._api_token
+        if json_content:
+            headers["Content-Type"] = "application/json;charset=UTF-8"
+        return headers
+
+    async def _api_login(self, *, force: bool = False) -> str:
+        if self._api_token and not force:
+            return self._api_token
+        self._api_device_id = self._api_device_id or uuid.uuid4().hex
+        payload = {"deviceId": self._api_device_id}
+        timeout = aiohttp.ClientTimeout(total=45, connect=15, sock_read=30)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.post(
+                self.IP_LOGIN_URL,
+                json=payload,
+                headers=self._api_headers(f"{self.BASE_URL}/index"),
+                ssl=False,
+            ) as resp:
+                data = await resp.json(content_type=None)
+        if data.get("code") != 0:
+            raise RuntimeError(f"Dawei ipLogin failed: {data.get('code')} {data.get('message')}")
+        token = ((data.get("data") or {}).get("token") or "").strip()
+        if not token:
+            raise RuntimeError("Dawei ipLogin did not return a token")
+        self._api_token = token
+        return token
+
+    async def _api_json(self, method: str, url: str, *, payload: dict = None, referer: str = None, retry: bool = True) -> dict:
+        await self._api_login()
+        timeout = aiohttp.ClientTimeout(total=60, connect=15, sock_read=45)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            request = session.post if method.upper() == "POST" else session.get
+            kwargs = {
+                "headers": self._api_headers(referer or f"{self.BASE_URL}/index", json_content=payload is not None),
+                "ssl": False,
+            }
+            if payload is not None:
+                kwargs["json"] = payload
+            async with request(url, **kwargs) as resp:
+                text = await resp.text()
+                try:
+                    data = json.loads(text)
+                except Exception as e:
+                    raise RuntimeError(f"Dawei API returned non-JSON HTTP {resp.status}: {text[:200]}") from e
+        if data.get("code") == 4000 and retry:
+            self._api_token = None
+            await self._api_login(force=True)
+            return await self._api_json(method, url, payload=payload, referer=referer, retry=False)
+        if data.get("code") not in (0, None):
+            raise RuntimeError(f"Dawei API error: {data.get('code')} {data.get('message')}")
+        return data
+
+    def _search_payload(
+        self,
+        search_query: str,
+        *,
+        db_types: list[str],
+        page_num: int,
+        page_size: int,
+        sort_by: str,
+    ) -> dict:
+        return {
+            "query": search_query,
+            "leftFilter": json.dumps({"data": [], "type": "AND"}, ensure_ascii=False, separators=(",", ":")),
+            "dbTypes": db_types,
+            "databases": [],
+            "fields": self.SEARCH_FIELDS,
+            "sortBy": "-AD" if sort_by in {"date_desc", "relevance"} else "",
+            "familyOption": {"mergeType": "Family"},
+            "searchType": "patent_list",
+            "firstReq": True,
+            "oriQuery": search_query,
+            "total": 0,
+            "pageNum": page_num,
+            "pageSize": page_size,
+            "imgReqId": None,
+            "representForm": None,
+        }
+
+    def _detail_payload(self, detail_url: str, *, fields: str = None) -> dict:
+        params = self._detail_params(detail_url)
+        pnm = (params.get("pnm") or "").strip()
+        cc = urllib.parse.parse_qs(urllib.parse.urlparse(detail_url).query).get("CC", [""])[0]
+        query = f"PNM={pnm}" if pnm else ""
+        return {
+            "databases": [cc] if cc else [],
+            "familyOption": {"mergeType": "None"},
+            "fields": fields or self.DETAIL_FIELDS,
+            "pageNum": 1,
+            "pageSize": 1,
+            "query": query,
+            "initPageFlag": False,
+            "searchType": "baseinfo_detail",
+        }
+
     @staticmethod
     def _response_body(response) -> dict:
         try:
@@ -194,6 +318,96 @@ class DaweiScraper:
                 return item
         return {}
 
+    def _papers_from_items(
+        self,
+        items: list[dict],
+        *,
+        limit: int,
+        start_year: int = None,
+        end_year: int = None,
+    ) -> list[dict]:
+        papers = []
+        for item in items or []:
+            if len(papers) >= limit:
+                break
+            date = item.get("AD") or item.get("PD") or item.get("GD") or ""
+            year = self._extract_year(date)
+            if not self._year_allowed(year, start_year=start_year, end_year=end_year):
+                continue
+
+            pnm = item.get("PNM") or item.get("PN") or ""
+            an = item.get("AN") or ""
+            cc = item.get("CC") or ""
+            title = self._pick_title(item)
+            detail_link = (
+                f"{self.BASE_URL}/detail?AN={urllib.parse.quote(an)}&PNM={urllib.parse.quote(pnm)}"
+                f"&CC={urllib.parse.quote(cc)}&pageNum=1&specialIndex={item.get('NO') or 1}"
+            )
+            uid = hashlib.md5(detail_link.encode()).hexdigest()[:8]
+            papers.append(
+                {
+                    "id": pnm or an or uid,
+                    "title": title.strip(),
+                    "author": (item.get("INN") or "").strip(),
+                    "source": f"Dawei Patent ({pnm})" if pnm else "Dawei Patent",
+                    "date": date,
+                    "db_type": item.get("AT") or item.get("PTS") or "Patent",
+                    "detail_link": detail_link,
+                }
+            )
+        return papers
+
+    async def _api_search_papers(
+        self,
+        query: str,
+        source_type: str = "all",
+        start_year: int = None,
+        end_year: int = None,
+        sort_by: str = "relevance",
+        start_index: int = 0,
+        limit: int = 10,
+    ) -> Dict:
+        search_query = self._build_query(query, start_year=start_year, end_year=end_year)
+        limit = max(0, int(limit or 0))
+        start_index = max(0, int(start_index or 0))
+        page_size = max(20, min(100, limit or 20))
+        page_num = (start_index // page_size) + 1
+        page_offset = start_index % page_size
+        payload = self._search_payload(
+            search_query,
+            db_types=self._db_types(source_type),
+            page_num=page_num,
+            page_size=page_size,
+            sort_by=sort_by,
+        )
+        data = await self._api_json("POST", self.SEARCH_API_URL, payload=payload, referer=f"{self.BASE_URL}/searchresult")
+        body = data.get("data") or {}
+        total_results = data.get("totalCount") or body.get("totalCount") or body.get("total") or 0
+        items = (body.get("patentList") or [])[page_offset:]
+        return {
+            "total_results": total_results,
+            "papers": self._papers_from_items(
+                items,
+                limit=limit,
+                start_year=start_year,
+                end_year=end_year,
+            ),
+        }
+
+    async def _api_load_detail_item(self, detail_url: str, *, fields: str = None) -> dict:
+        data = await self._api_json(
+            "POST",
+            self.SEARCH_API_URL,
+            payload=self._detail_payload(detail_url, fields=fields),
+            referer=detail_url,
+        )
+        items = ((data.get("data") or {}).get("patentList")) or []
+        return self._pick_detail_item(items, detail_url)
+
+    async def _api_extract_pdf_url(self, detail_url: str) -> str:
+        item = await self._api_load_detail_item(detail_url, fields="PDF")
+        return item.get("PDF", "") if item else ""
+
     async def _goto_home(self):
         try:
             await self.page.goto(f"{self.BASE_URL}/index", wait_until="domcontentloaded", timeout=90000)
@@ -218,6 +432,19 @@ class DaweiScraper:
         start_index: int = 0,
         limit: int = 10,
     ) -> Dict:
+        try:
+            return await self._api_search_papers(
+                query,
+                source_type=source_type,
+                start_year=start_year,
+                end_year=end_year,
+                sort_by=sort_by,
+                start_index=start_index,
+                limit=limit,
+            )
+        except Exception as e:
+            print(f"Dawei API-first search failed ({e}); falling back to browser flow.")
+
         await self._ensure_browser()
         search_query = self._build_query(query, start_year=start_year, end_year=end_year)
         await self._goto_home()
@@ -278,39 +505,17 @@ class DaweiScraper:
         total_results = payload.get("totalCount") or data.get("totalCount") or data.get("total") or 0
         items = data.get("patentList") or []
 
-        papers = []
-        for item in items[page_offset:]:
-            if len(papers) >= limit:
-                break
-            date = item.get("AD") or item.get("PD") or item.get("GD") or ""
-            year = self._extract_year(date)
-            if not self._year_allowed(year, start_year=start_year, end_year=end_year):
-                continue
+        return {
+            "total_results": total_results,
+            "papers": self._papers_from_items(
+                items[page_offset:],
+                limit=limit,
+                start_year=start_year,
+                end_year=end_year,
+            ),
+        }
 
-            pnm = item.get("PNM") or item.get("PN") or ""
-            an = item.get("AN") or ""
-            cc = item.get("CC") or ""
-            title = self._pick_title(item)
-            detail_link = (
-                f"{self.BASE_URL}/detail?AN={urllib.parse.quote(an)}&PNM={urllib.parse.quote(pnm)}"
-                f"&CC={urllib.parse.quote(cc)}&pageNum=1&specialIndex={item.get('NO') or 1}"
-            )
-            uid = hashlib.md5(detail_link.encode()).hexdigest()[:8]
-            papers.append(
-                {
-                    "id": pnm or an or uid,
-                    "title": title.strip(),
-                    "author": (item.get("INN") or "").strip(),
-                    "source": f"Dawei Patent ({pnm})" if pnm else "Dawei Patent",
-                    "date": date,
-                    "db_type": item.get("AT") or item.get("PTS") or "Patent",
-                    "detail_link": detail_link,
-                }
-            )
-
-        return {"total_results": total_results, "papers": papers}
-
-    async def _load_detail_item(self, detail_url: str) -> dict:
+    async def _load_detail_item_via_browser(self, detail_url: str) -> dict:
         await self._ensure_browser()
         try:
             if self.page.url.startswith(f"{self.BASE_URL}/detail"):
@@ -327,6 +532,15 @@ class DaweiScraper:
         except Exception as e:
             print(f"Dawei detail response wait failed: {e}")
             return {}
+
+    async def _load_detail_item(self, detail_url: str) -> dict:
+        try:
+            item = await self._api_load_detail_item(detail_url)
+            if item:
+                return item
+        except Exception as e:
+            print(f"Dawei API-first detail failed ({e}); falling back to browser flow.")
+        return await self._load_detail_item_via_browser(detail_url)
 
     async def get_paper_details(self, url: str) -> Dict:
         item = await self._load_detail_item(url)
@@ -347,7 +561,14 @@ class DaweiScraper:
             await self.page.get_by_text("PDF\u539f\u6587", exact=True).click(timeout=10000)
 
     async def _extract_pdf_url(self, detail_url: str) -> str:
-        detail_item = await self._load_detail_item(detail_url)
+        try:
+            pdf_url = await self._api_extract_pdf_url(detail_url)
+            if pdf_url:
+                return pdf_url
+        except Exception as e:
+            print(f"Dawei API-first PDF URL lookup failed ({e}); falling back to browser flow.")
+
+        detail_item = await self._load_detail_item_via_browser(detail_url)
         if not detail_item:
             return ""
         try:
@@ -367,7 +588,6 @@ class DaweiScraper:
         return item.get("PDF", "") if item else ""
 
     async def download_paper(self, url: str, output_dir: str) -> str:
-        await self._ensure_browser()
         os.makedirs(output_dir, exist_ok=True)
         pdf_url = await self._extract_pdf_url(url)
         if not pdf_url:
@@ -375,38 +595,29 @@ class DaweiScraper:
 
         pnm = urllib.parse.parse_qs(urllib.parse.urlparse(url).query).get("PNM", ["dawei_patent"])[0]
         file_path = os.path.join(output_dir, f"{safe_stem(pnm)}.pdf")
-        headers = {"Referer": url}
+        headers = {"Referer": url, "User-Agent": self.USER_AGENT, "Accept": "application/pdf,*/*"}
         errors = []
         body = b""
         status = None
 
-        for timeout in (60000,):
+        timeout = aiohttp.ClientTimeout(total=75, connect=20, sock_read=60)
+        try:
+            async with aiohttp.ClientSession(headers=headers, timeout=timeout) as session:
+                async with session.get(pdf_url, ssl=False) as resp:
+                    status = resp.status
+                    body = await resp.read()
+        except Exception as e:
+            errors.append(f"aiohttp direct failed: {e}")
+
+        if not (status == 200 and body.startswith(b"%PDF")):
+            errors.append(f"aiohttp direct returned HTTP {status} or a non-PDF payload.")
+            await self._ensure_browser()
             try:
-                response = await self.context.request.get(pdf_url, headers=headers, timeout=timeout)
+                response = await self.context.request.get(pdf_url, headers=headers, timeout=60000)
                 status = response.status
                 body = await response.body()
             except Exception as e:
-                errors.append(str(e))
-                await asyncio.sleep(2)
-                continue
-            if status == 200 and body.startswith(b"%PDF"):
-                break
-            errors.append(f"Playwright request returned HTTP {status} or a non-PDF payload.")
-
-        if not (status == 200 and body.startswith(b"%PDF")):
-            try:
-                user_agent = await self.page.evaluate("navigator.userAgent")
-            except Exception:
-                user_agent = "Mozilla/5.0"
-            direct_headers = {"Referer": url, "User-Agent": user_agent, "Accept": "application/pdf,*/*"}
-            timeout = aiohttp.ClientTimeout(total=75, connect=20, sock_read=60)
-            try:
-                async with aiohttp.ClientSession(headers=direct_headers, timeout=timeout) as session:
-                    async with session.get(pdf_url, ssl=False) as resp:
-                        status = resp.status
-                        body = await resp.read()
-            except Exception as e:
-                errors.append(f"aiohttp fallback failed: {e}")
+                errors.append(f"Playwright fallback failed: {e}")
 
         if status != 200:
             return f"Error: Dawei PDF request returned HTTP {status}. Attempts: {' | '.join(errors[-3:])}"

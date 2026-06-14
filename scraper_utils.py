@@ -30,7 +30,7 @@ _PLATFORM_DOMAIN_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("ARXIV",  re.compile(r"(?:^|\.)arxiv\.org$", re.IGNORECASE)),
     ("IEEE",   re.compile(r"(?:^|\.)ieee(?:xplore)?\.ieee\.org$|(?:^|\.)ieeexplore\.ieee\.org$", re.IGNORECASE)),
     ("ACM",    re.compile(r"(?:^|\.)acm\.org$", re.IGNORECASE)),
-    ("SD",     re.compile(r"(?:^|\.)sciencedirect\.com$|(?:^|\.)linkinghub\.elsevier\.com$", re.IGNORECASE)),
+    ("SD",     re.compile(r"(?:^|\.)sciencedirect\.com$|(?:^|\.)sciencedirectassets\.com$|(?:^|\.)linkinghub\.elsevier\.com$", re.IGNORECASE)),
     ("CNKI",   re.compile(r"(?:^|\.)cnki\.(?:com\.cn|net)$", re.IGNORECASE)),
     ("PATYEE", re.compile(r"(?:^|\.)patyee\.com$", re.IGNORECASE)),
     ("DAWEI",  re.compile(r"(?:^|\.)daweisoft\.com$", re.IGNORECASE)),

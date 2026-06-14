@@ -1,19 +1,52 @@
-import os
 import asyncio
-import functools
-import sys
-from mcp_logging import safe_stderr_print
+import os
+import re
+from typing import Dict
+from urllib.parse import urlencode, urljoin
 import urllib.request
-import urllib.parse
-from urllib.error import URLError, HTTPError
-import xml.etree.ElementTree as ET
-from typing import List, Dict, Optional
+
 import bs4
 import pymupdf4llm
 import hashlib
-import re
+from mcp_logging import safe_stderr_print
 
 print = safe_stderr_print
+
+ARXIV_FRONTEND_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36"
+    ),
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9",
+}
+
+
+def _fetch_text(url: str, *, referer: str = "https://arxiv.org/") -> str:
+    headers = dict(ARXIV_FRONTEND_HEADERS)
+    if referer:
+        headers["Referer"] = referer
+    req = urllib.request.Request(url, headers=headers)
+    with urllib.request.urlopen(req, timeout=30) as response:
+        raw = response.read()
+        charset = response.headers.get_content_charset() or "utf-8"
+        return raw.decode(charset, errors="replace")
+
+
+def _year_allowed(year: int | None, start_year: int = None, end_year: int = None) -> bool:
+    if year is None:
+        return True
+    if start_year is not None and year < int(start_year):
+        return False
+    if end_year is not None and year > int(end_year):
+        return False
+    return True
+
+
+def _extract_first_year(text: str) -> int | None:
+    m = re.search(r"\b(19|20)\d{2}\b", text or "")
+    return int(m.group(0)) if m else None
+
 
 class ArxivScraper:
     def __init__(self):
@@ -46,34 +79,68 @@ class ArxivScraper:
             self.page = None
 
     async def search_papers(self, query: str, search_field: str = "all", db_scope: str = "", source_type: str = "all", journal: str = None, start_year: int = None, end_year: int = None, sort_by: str = "relevance", start_index: int = 0, limit: int = 10) -> Dict:
-        await self.initialize()
-        
         # Mapping to arXiv advanced search fields
         field_map = {
             "全部": "all", "主题": "all",
-            "篇名": "title", "摘要": "abstract",
-            "作者": "author", "关键词": "all",
+            "篇名": "title", "摘要": "abstract", "作者": "author", "关键词": "all",
+            "ti": "title", "au": "author", "abs": "abstract", "cat": "cross_list_category",
         }
         prefix = field_map.get(search_field, search_field if search_field in ["all", "title", "author", "abstract"] else "all")
-        
-        encoded_query = urllib.parse.quote_plus(query)
+
+        order_map = {
+            "date_desc": "-announced_date_first",
+            "relevance": "",
+            "citations": "",
+        }
+        order = order_map.get(sort_by, "")
         # ArXiv frontend requires specific sizes like 25, 50, 100, 200.
         size = 50
-        
-        url = f"https://arxiv.org/search/?query={encoded_query}&searchtype={prefix}&abstracts=show&size={size}"
-        
-        if sort_by == "date_desc":
-            url += "&order=-announced_date_first"
+        offset = max(0, int(start_index or 0))
+
+        params = {
+            "advanced": "1",
+            "terms-0-operator": "AND",
+            "terms-0-term": query,
+            "terms-0-field": prefix,
+            "classification-include_cross_list": "include",
+            "abstracts": "show",
+            "size": str(size),
+            "order": order,
+            "start": str(offset),
+        }
+        if start_year is not None or end_year is not None:
+            params["date-filter_by"] = "date_range"
+            params["date-date_type"] = "submitted_date"
+            if start_year is not None:
+                params["date-from_date"] = f"{int(start_year):04d}-01-01"
+            if end_year is not None:
+                params["date-to_date"] = f"{int(end_year):04d}-12-31"
         else:
-            url += "&order=-announced_date_first" # Usually they prefer newest
-            
-        print(f"Navigating to arXiv frontend: {url}")
-        await self.page.goto(url, wait_until="domcontentloaded")
+            params["date-filter_by"] = "all_dates"
+
+        source_map = {
+            "cs": "classification-computer_science",
+            "econ": "classification-economics",
+            "eess": "classification-eess",
+            "math": "classification-mathematics",
+            "physics": "classification-physics",
+            "q-bio": "classification-q_biology",
+            "q-fin": "classification-q_finance",
+            "stat": "classification-statistics",
+        }
+        source_key = source_map.get((source_type or "").strip().lower())
+        if source_key:
+            params[source_key] = "y"
+            if source_key == "classification-physics":
+                params["classification-physics_archives"] = "all"
+
+        url = "https://arxiv.org/search/advanced?" + urlencode(params)
+
+        print(f"Fetching arXiv frontend HTML: {url}")
         try:
-            await self.page.wait_for_selector("li.arxiv-result, p.title", timeout=8000)
-        except Exception:
-            pass
-        html = await self.page.content()
+            html = await asyncio.to_thread(_fetch_text, url)
+        except Exception as e:
+            return {"total_results": "0", "papers": [], "error": f"arXiv frontend fetch failed: {e}"}
         soup = bs4.BeautifulSoup(html, "html.parser")
         
         total_str = "未知"
@@ -103,17 +170,20 @@ class ArxivScraper:
             
             date_p = li.find('p', class_='is-size-7')
             date = "N/A"
+            year = None
             if date_p:
-                m = re.search(r'(\d{4})', date_p.text)
-                if m:
-                    date = m.group(1)
+                year = _extract_first_year(date_p.text)
+                if year:
+                    date = str(year)
+            if not _year_allowed(year, start_year, end_year):
+                continue
             
             link_p = li.find('p', class_='list-title')
             detail_link = ""
             if link_p:
                 a_tag = link_p.find('a')
                 if a_tag and 'href' in a_tag.attrs:
-                    detail_link = a_tag['href']
+                    detail_link = urljoin("https://arxiv.org/", a_tag['href'])
                     
             uid = hashlib.md5(detail_link.encode()).hexdigest()[:8] if detail_link else "unk"
             
@@ -145,11 +215,7 @@ class ArxivScraper:
         arxiv_id = match.group(1)
         
         try:
-            await self.initialize()
-            from scraper_utils import goto_with_retry
-            await goto_with_retry(self.page, detail_url, wait_until="domcontentloaded")
-            await asyncio.sleep(2)
-            html = await self.page.content()
+            html = await asyncio.to_thread(_fetch_text, detail_url)
             soup = bs4.BeautifulSoup(html, "html.parser")
             
             abs_block = soup.find('blockquote', class_='abstract')

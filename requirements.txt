@@ -1,8 +1,10 @@
 mcp
+aiohttp
 playwright
 beautifulsoup4
 pymupdf4llm
 camoufox[geoip]
+curl_cffi
 PyMySQL
 python-dotenv
 fastapi

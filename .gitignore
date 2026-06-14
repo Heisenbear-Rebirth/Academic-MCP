@@ -40,6 +40,8 @@ tmp/
 # profile is held by another live MCP server. Auto-deleted on close(); ignored
 # in case a crash leaves one behind.
 .*_profile__p*/
+# Dedicated profile sets created via MCP_PROFILE_SUFFIX, e.g. .sd_profile_codex/
+.*_profile_*/
 .playwright-mcp/
 .ms-playwright/
 

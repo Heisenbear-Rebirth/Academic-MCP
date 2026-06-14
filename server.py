@@ -5,6 +5,7 @@ ensure_runtime_environment()
 import asyncio
 import json
 import os
+import time
 import traceback
 from pathlib import Path
 from typing import Dict, List
@@ -324,6 +325,72 @@ async def read_paper_content(url: str, output_dir: str, platform: str = "CNKI") 
         path, preview = raw_result
         return f"Markdown generation complete. Saved to: {path}\n\nPreview:\n{preview}..."
     return str(raw_result)
+
+
+@mcp.tool()
+async def warmup_platform_auth(platforms: str = "ACM,SD", timeout_seconds: int = None) -> str:
+    """
+    Open visible browser windows to refresh anti-bot verification sessions for selected platforms.
+    - platforms: Comma-separated platform codes. Currently useful for "ACM" and "SD".
+    - timeout_seconds: Optional manual verification wait time per platform. Defaults to runtime config.
+
+    After the user completes Cloudflare/DataDome/Turnstile in the browser, cookies and the pinned
+    browser fingerprint are saved so later search/details/download calls can use request/fetch paths
+    instead of simulated button-click workflows.
+    """
+    requested = [
+        item.strip().upper()
+        for item in str(platforms or "ACM,SD").replace(";", ",").split(",")
+        if item.strip()
+    ]
+    if not requested:
+        requested = ["ACM", "SD"]
+
+    results = []
+    for norm in requested:
+        start = time.perf_counter()
+        scraper = None
+        try:
+            scraper = get_scraper(norm)
+            warmup = getattr(scraper, "warmup_auth", None)
+            if not callable(warmup):
+                results.append(
+                    {
+                        "platform": norm,
+                        "ok": False,
+                        "seconds": 0,
+                        "error": "This platform does not expose a manual auth warmup flow.",
+                    }
+                )
+                continue
+            info = await warmup(timeout_seconds=timeout_seconds)
+            info["seconds_total"] = round(time.perf_counter() - start, 3)
+            results.append(info)
+        except Exception as e:
+            results.append(
+                {
+                    "platform": norm,
+                    "ok": False,
+                    "seconds_total": round(time.perf_counter() - start, 3),
+                    "error": f"{type(e).__name__}: {e}",
+                    "traceback": traceback.format_exc(limit=8),
+                }
+            )
+        finally:
+            try:
+                close = getattr(scraper, "close", None) if scraper is not None else None
+                if callable(close):
+                    await close()
+            except Exception as e:
+                results.append(
+                    {
+                        "platform": norm,
+                        "ok": False,
+                        "error": f"close failed after warmup: {type(e).__name__}: {e}",
+                    }
+                )
+
+    return json.dumps({"results": results}, ensure_ascii=False, indent=2)
 
 
 @mcp.tool()

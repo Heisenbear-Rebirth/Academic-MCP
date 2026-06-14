@@ -217,9 +217,15 @@ MYSQL_DATABASE=academic_mcp
 `output_dir`。新下载时同时写入仓库正式位置 **和** 镜像给调用方。
 返回本地文件路径。
 
-SD 走了自定义路径：在导航阶段直接拦截签名后的 S3 PDF URL（而不是
-等不可靠的「点击-下载」事件），所以 DataDome 拦截下的下载现在
-~20 秒能拿到，而不是 60 秒超时。
+ACM 和 SD 在拿到浏览器验证态后，会优先走请求级获取。ACM 会用
+验证 cookies 请求 DOI PDF 端点；如果详情页本身不暴露 PDF 链接，
+并且 `/doi/pdf/...` 也回到摘要 HTML，就归类为 unavailable，而不是
+程序失败。
+
+SD 的搜索 / 详情优先走直接 HTTP；PDF 下载只用浏览器推进到能拿到
+或触发签名 ScienceDirect asset URL 的位置，之后通过程序侧 download
+事件 / 响应体捕获保存 PDF。PDF host 的挑战人工点过一次后，新 PDF
+通常几秒内就能保存，不再卡在 viewer 里等超时。
 
 ### `read_paper_content(url, output_dir, platform="CNKI")`
 
@@ -419,6 +425,25 @@ PowerShell 版本（`library_web_start.ps1` / `library_web_stop.ps1`）
 
 ---
 
+## 验证快照
+
+最近一次全平台冒烟测试：`scratch/full_platform_test.py`，run id
+`20260614_full_final`；支持下载的平台每个平台 3 个下载样本。硬失败：
+**0**。表里的 unavailable 是出版方 / 工具语义状态，不是 scraper 异常。
+
+| 平台 | 搜索 | 详情 | 下载结果 | 阅读结果 |
+| ---- | ---: | ---: | -------- | -------- |
+| `ARXIV`  | 6.584 s | 4.976 s | 3/3 OK：15.065、12.841、10.203 s | success，20.405 s |
+| `CNKI`   | 1.587 s | 0.198 s | 3/3 OK：1.488、1.479、1.325 s | success，2.178 s |
+| `IEEE`   | 4.165 s | 1.149 s | 3/3 OK：29.498、8.352、2.809 s | success，36.236 s |
+| `ACM`    | 25.385 s | 3.034 s | 3/3 unavailable：测试文章不暴露 PDF 链接 | unavailable |
+| `SD`     | 15.312 s | 4.913 s | 3/3 OK：4.835、5.381、3.819 s | success，22.149 s |
+| `GS`     | 2.443 s | 0.000 s | 设计上不适用 / unavailable | not applicable |
+| `PATYEE` | 1.695 s | 0.374 s | 1/3 OK，2/3 unavailable | success，8.778 s |
+| `DAWEI`  | 2.551 s | 0.755 s | 3/3 OK：3.115、3.284、2.598 s | success，4.768 s |
+
+---
+
 ## 故障排除
 
 | 现象                                                                  | 可能原因                                                            | 修复                                                                                                                  |
@@ -426,7 +451,8 @@ PowerShell 版本（`library_web_start.ps1` / `library_web_stop.ps1`）
 | Camoufox `Failed to launch the browser process / exitCode=0`         | 上次崩溃在 profile 里留了 `parent.lock`。                              | 下次启动 `scraper_utils.acquire_profile` 会自动清。再卡死就手删 `.<平台>_profile/parent.lock`。                              |
 | `TargetClosedError: Target page, context or browser has been closed` | Cloudflare 超时把 persistent context 卡死了。                          | 已自处理：`_context_is_alive` 检测到后下次调用前重建。频繁出现就重启 MCP server。                                                |
 | `ProfileInUseError: ... already in use by another MCP server`        | 第二个 client 想抢的 profile 被另一个 **活的** PID 占着。                | 关掉另一个 client，或者给当前 client 设个不一样的 `MCP_PROFILE_SUFFIX`。                                                       |
-| SD `Timed out (60s) waiting for PDF download or stream navigation`   | DataDome 给你返了 HTML 不是 PDF 流。                                  | 错误消息现已带 asset URL + viewer state。先在 headful 模式过一遍 CAPTCHA，重试时 cookies 自动接续。                            |
+| SD PDF 页面能看到正文但没有保存文件                                     | Firefox 把 PDF 当内置 viewer 打开，没发 download 事件。                    | 已自处理：SD profile 会强制 `application/pdf` save-to-disk，scraper 捕获 download 事件保存。                                  |
+| ACM 下载返回 unavailable                                              | 文章页和 `/doi/pdf/...` 都回到摘要 HTML，不暴露 PDF 链接。                | 按出版方不可下载处理，不算 scraper 失败；换一篇 ACM 文章 / DOI 再试。                                                           |
 | `_cache_hit=true` 但结果一看就陈旧                                     | 永久搜索缓存返回了一条化石。                                            | `/searches` 删掉该行，重新搜。                                                                                            |
 | CNKI 上 `journal=` 过滤返 0 结果                                       | CNKI 的相关性排序未必把目标期刊塞进第 1 页。                              | 加大 `limit`、把 query 改得更具体，或接受 CNKI 在跨期刊覆盖上对宽 query 稀疏的事实。                                            |
 | 启动时 Library 被禁（`[Library] Disabled: ...`）                       | MySQL 配置缺失 / 错误 / 不可达。                                       | 检查 `.env`。服务器仍跑 passthrough 模式，只是缓存和共享状态关掉了。                                                          |
@@ -436,7 +462,8 @@ PowerShell 版本（`library_web_start.ps1` / `library_web_stop.ps1`）
 ## 项目约定
 
 - `scratch/` 已 git-ignore。调试脚本、抓回的 HTML、截图都放这。
-- `.{platform}_profile/`、`.repo/`、`.venv/`、`.env` 全部 git-ignore。
+- `.{platform}_profile/`、`.sd_profile_codex/` 这类带后缀的 profile
+  目录、`.repo/`、`.venv/`、`.env` 全部 git-ignore。
 - 各 `*_scraper.py` 模块导出一个 `scraper_instance` 单例
   （`server.py` 直接 import），用以让每个平台在 MCP server 进程内
   持有一份长寿命的 Camoufox/Chromium context。

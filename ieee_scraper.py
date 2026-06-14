@@ -2,6 +2,7 @@ import os
 import asyncio
 import functools
 import sys
+import json
 from mcp_logging import safe_stderr_print
 from typing import List, Dict, Optional
 from playwright.async_api import async_playwright
@@ -9,6 +10,8 @@ import bs4
 import pymupdf4llm
 import re
 import hashlib
+import urllib.parse
+import aiohttp
 
 print = safe_stderr_print
 
@@ -18,6 +21,7 @@ class IEEEScraper:
         self.browser = None
         self.context = None
         self.page = None
+        self.http_session = None
     
     async def initialize(self, force_headful=False):
         import json
@@ -69,6 +73,12 @@ class IEEEScraper:
         await apply_browser_cookies(self.context, "IEEE")
 
     async def close(self):
+        if getattr(self, "http_session", None) and not self.http_session.closed:
+            try:
+                await self.http_session.close()
+            except Exception:
+                pass
+            self.http_session = None
         if getattr(self, "context", None):
             try:
                 from scraper_utils import capture_browser_cookies
@@ -94,7 +104,343 @@ class IEEEScraper:
             cleanup_pooled_profile(self._profile_dir, getattr(self, "_profile_ephemeral", False))
             self._profile_dir = None
 
+    def _default_headers(self, *, referer: str = None, accept: str = "application/json, text/plain, */*") -> dict:
+        headers = {
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/125.0.0.0 Safari/537.36"
+            ),
+            "Accept": accept,
+            "Accept-Language": "en-US,en;q=0.9,zh-CN;q=0.8,zh;q=0.7",
+            "Cache-Control": "no-cache",
+            "Pragma": "no-cache",
+        }
+        if referer:
+            headers["Referer"] = referer
+        return headers
+
+    async def _ensure_http_session(self) -> aiohttp.ClientSession:
+        if self.http_session and not self.http_session.closed:
+            return self.http_session
+        timeout = aiohttp.ClientTimeout(total=180, connect=15, sock_read=150)
+        self.http_session = aiohttp.ClientSession(timeout=timeout)
+        return self.http_session
+
+    def _has_ieee_session_cookies(self) -> bool:
+        session = getattr(self, "http_session", None)
+        if not session or session.closed:
+            return False
+        try:
+            names = {cookie.key for cookie in session.cookie_jar}
+        except Exception:
+            return False
+        return bool(names.intersection({"JSESSIONID", "WLSESSION", "xpluserinfo", "ERIGHTS", "ipList"}))
+
+    def _strip_html(self, text: str) -> str:
+        clean = bs4.BeautifulSoup(text or "", "html.parser").get_text(" ", strip=True)
+        return self._clean_text_markers(clean)
+
+    def _clean_text_markers(self, text: str) -> str:
+        return str(text or "").replace("[::", "").replace("::]", "")
+
+    def _build_search_payload(
+        self,
+        query: str,
+        search_field: str,
+        source_type: str,
+        journal: str,
+        start_year: int,
+        end_year: int,
+        sort_by: str,
+        page_number: int,
+    ) -> dict:
+        journal_clean = (journal or "").strip()
+        if journal_clean:
+            quoted = journal_clean.replace('"', '\\"')
+            search_query = f'("Publication Title":"{quoted}") AND ({query})'
+        else:
+            search_query = query
+
+        payload = {
+            "newsearch": True,
+            "queryText": search_query,
+            "highlight": True,
+            "returnFacets": ["ALL"],
+            "returnType": "SEARCH",
+            "matchPubs": True,
+            "pageNumber": str(page_number),
+        }
+        if sort_by == "citations":
+            payload["sortType"] = "paper-citations"
+        elif sort_by == "date_desc":
+            payload["sortType"] = "newest"
+
+        if start_year and end_year:
+            payload["ranges"] = [f"{start_year}_{end_year}_Year"]
+        elif start_year:
+            payload["ranges"] = [f"{start_year}_2026_Year"]
+        elif end_year:
+            payload["ranges"] = [f"1900_{end_year}_Year"]
+        return payload
+
+    def _record_matches_source_type(self, record: dict, source_type: str) -> bool:
+        source = (source_type or "").strip().lower()
+        if source in ("", "all", "全部"):
+            return True
+        haystack = " ".join(
+            str(record.get(k) or "")
+            for k in ("contentType", "displayContentType", "articleContentType", "docIdentifier")
+        ).lower()
+        aliases = {
+            "conferences": ("conference",),
+            "journals": ("journal", "magazine", "early access"),
+            "magazines": ("magazine",),
+            "books": ("book",),
+            "early access articles": ("early access",),
+            "standards": ("standard",),
+            "courses": ("course",),
+        }
+        needles = aliases.get(source, (source,))
+        return any(needle in haystack for needle in needles)
+
+    def _parse_search_record(self, record: dict, journal: str = None) -> Optional[dict]:
+        title = self._strip_html(record.get("articleTitle") or record.get("highlightedTitle") or "N/A")
+        link = record.get("documentLink") or ""
+        if link and link.startswith("/"):
+            link = urllib.parse.urljoin("https://ieeexplore.ieee.org", link)
+        arnumber = str(record.get("articleNumber") or record.get("arnumber") or "").strip()
+        if not link and arnumber:
+            link = f"https://ieeexplore.ieee.org/document/{arnumber}/"
+
+        authors = []
+        for author in record.get("authors") or []:
+            if isinstance(author, dict):
+                name = author.get("preferredName") or author.get("normalizedName")
+                if name:
+                    authors.append(str(name).strip())
+            elif isinstance(author, str):
+                authors.append(author.strip())
+        author_str = ", ".join([a for a in authors if a]) or "N/A"
+
+        venue_name = (
+            record.get("displayPublicationTitle")
+            or record.get("publicationTitle")
+            or record.get("publication")
+            or ""
+        ).strip()
+        venue_name = self._clean_text_markers(venue_name)
+        from scraper_utils import venue_matches
+        if journal and venue_name and not venue_matches(journal, venue_name):
+            return None
+
+        date = (
+            record.get("publicationDate")
+            or record.get("publicationYear")
+            or record.get("dateOfInsertion")
+            or "N/A"
+        )
+        doc_type = (
+            record.get("displayContentType")
+            or record.get("contentType")
+            or record.get("articleContentType")
+            or "N/A"
+        )
+        pdf_url = record.get("pdfLink") or ""
+        if pdf_url and pdf_url.startswith("/"):
+            pdf_url = urllib.parse.urljoin("https://ieeexplore.ieee.org", pdf_url)
+        uid = hashlib.md5((link or arnumber or title).encode()).hexdigest()[:8]
+        return {
+            "id": uid,
+            "title": title,
+            "author": author_str,
+            "source": venue_name or "IEEE",
+            "venue_name": venue_name,
+            "date": self._clean_text_markers(str(date).strip()),
+            "db_type": self._clean_text_markers(str(doc_type).strip()),
+            "detail_link": link,
+            "pdf_url": pdf_url,
+            "arnumber": arnumber,
+        }
+
+    async def _post_search_api(self, payload: dict) -> dict:
+        url = "https://ieeexplore.ieee.org/rest/search"
+        referer = "https://ieeexplore.ieee.org/search/searchresult.jsp"
+        headers = self._default_headers(referer=referer, accept="application/json, text/plain, */*")
+        headers.update({
+            "Content-Type": "application/json",
+            "Origin": "https://ieeexplore.ieee.org",
+        })
+        session = await self._ensure_http_session()
+        async with session.post(url, json=payload, headers=headers, ssl=False) as resp:
+            body = await resp.read()
+            if resp.status != 200:
+                raise RuntimeError(f"IEEE search API returned HTTP {resp.status}")
+            try:
+                return json.loads(body.decode("utf-8", errors="ignore"))
+            except Exception as e:
+                raise RuntimeError(f"IEEE search API returned non-JSON payload: {e}") from e
+
+    async def _search_papers_direct(
+        self,
+        query: str,
+        search_field: str,
+        source_type: str,
+        journal: str,
+        start_year: int,
+        end_year: int,
+        sort_by: str,
+        start_index: int,
+        limit: int,
+    ) -> Dict:
+        page_size = 25
+        page_number = (start_index // page_size) + 1
+        offset = start_index % page_size
+        papers = []
+        total_results = "0"
+
+        while len(papers) < limit and page_number <= ((start_index // page_size) + 6):
+            payload = self._build_search_payload(
+                query,
+                search_field,
+                source_type,
+                journal,
+                start_year,
+                end_year,
+                sort_by,
+                page_number,
+            )
+            data = await self._post_search_api(payload)
+            total_results = str(data.get("totalRecords") or data.get("totalResults") or total_results)
+            records = data.get("records") or []
+            if not records:
+                break
+            for record in records[offset:]:
+                if len(papers) >= limit:
+                    break
+                if not self._record_matches_source_type(record, source_type):
+                    continue
+                parsed = self._parse_search_record(record, journal=journal)
+                if parsed:
+                    papers.append(parsed)
+            offset = 0
+            if len(records) < page_size:
+                break
+            page_number += 1
+        return {"total_results": total_results, "papers": papers}
+
+    def _parse_detail_metadata(self, html: str) -> dict:
+        match = re.search(r'xplGlobal\.document\.metadata\s*=\s*(\{.*?\});', html or "", re.DOTALL)
+        if not match:
+            raise RuntimeError("IEEE detail page did not contain xplGlobal.document.metadata")
+        return json.loads(match.group(1))
+
+    def _metadata_to_details(self, meta: dict, detail_url: str) -> Dict[str, str]:
+        abstract = "No abstract found."
+        if meta.get("abstract"):
+            abstract = self._strip_html(meta.get("abstract"))
+        keywords = []
+        for k_obj in meta.get("keywords") or []:
+            if isinstance(k_obj, dict):
+                keywords.extend([str(kw).strip() for kw in k_obj.get("kwd") or [] if kw])
+        doi = meta.get("doi") or ""
+        return {
+            "url": detail_url,
+            "abstract": abstract,
+            "keywords": list(dict.fromkeys(keywords)),
+            "doi": doi,
+        }
+
+    async def _fetch_detail_metadata_direct(self, detail_url: str) -> dict:
+        headers = self._default_headers(
+            referer="https://ieeexplore.ieee.org/search/searchresult.jsp",
+            accept="text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        )
+        session = await self._ensure_http_session()
+        async with session.get(detail_url, headers=headers, ssl=False) as resp:
+            html = await resp.text(errors="ignore")
+            if resp.status != 200:
+                raise RuntimeError(f"IEEE detail direct GET returned HTTP {resp.status}")
+        return self._parse_detail_metadata(html)
+
+    async def _download_paper_direct(self, detail_url: str, output_dir: str, arnumber: str) -> str:
+        headers = self._default_headers(
+            referer="https://ieeexplore.ieee.org/search/searchresult.jsp",
+            accept="text/html,application/xhtml+xml,application/pdf,*/*",
+        )
+        pdf_headers = self._default_headers(
+            referer=detail_url,
+            accept="application/pdf,text/html,*/*",
+        )
+        pdf_url = f"https://ieeexplore.ieee.org/stampPDF/getPDF.jsp?tp=&arnumber={arnumber}"
+        file_path = os.path.join(output_dir, f"ieee_{arnumber}.pdf")
+        session = await self._ensure_http_session()
+
+        async def warm_detail_session():
+            async with session.get(detail_url, headers=headers, ssl=False) as resp:
+                await resp.read()
+                if resp.status != 200:
+                    raise RuntimeError(f"IEEE detail warmup returned HTTP {resp.status}")
+
+        async def fetch_pdf():
+            async with session.get(pdf_url, headers=pdf_headers, ssl=False, allow_redirects=True) as resp:
+                body = await resp.read()
+                content_type = (resp.headers.get("content-type") or "").lower()
+                if resp.status == 200 and (body.startswith(b"%PDF") or "application/pdf" in content_type):
+                    with open(file_path, "wb") as f:
+                        f.write(body)
+                    print(f"[IEEE] Direct PDF request succeeded ({len(body)} bytes).")
+                    return file_path
+                return resp.status, content_type, body
+
+        warmed_now = False
+        if not self._has_ieee_session_cookies():
+            await warm_detail_session()
+            warmed_now = True
+
+        result = await fetch_pdf()
+        if isinstance(result, str):
+            return result
+
+        if not warmed_now:
+            # A search-warmed session is usually enough, but if IEEE returns a
+            # transient HTML trap, refresh article-scoped cookies once and retry.
+            await warm_detail_session()
+            result = await fetch_pdf()
+            if isinstance(result, str):
+                return result
+
+        status, content_type, body = result
+
+        try:
+            os.makedirs("scratch", exist_ok=True)
+            import time as _t
+            dump_path = os.path.join("scratch", f"ieee_direct_pdf_fail_{arnumber}_{int(_t.time())}.html")
+            with open(dump_path, "wb") as f:
+                f.write(body)
+        except Exception:
+            dump_path = "(dump failed)"
+        raise RuntimeError(
+            f"IEEE direct PDF returned HTTP {status}, content-type={content_type or '?'}, "
+            f"size={len(body)}B; dumped to {dump_path}"
+        )
+
     async def search_papers(self, query: str, search_field: str = "All", db_scope: str = "", source_type: str = "all", journal: str = None, start_year: int = None, end_year: int = None, sort_by: str = "relevance", start_index: int = 0, limit: int = 10) -> Dict:
+        try:
+            return await self._search_papers_direct(
+                query,
+                search_field,
+                source_type,
+                journal,
+                start_year,
+                end_year,
+                sort_by,
+                start_index,
+                limit,
+            )
+        except Exception as e:
+            print(f"[IEEE] Direct search API failed ({e}); falling back to browser search.")
+
         if not self.page:
             await self.initialize()
 
@@ -307,6 +653,12 @@ class IEEEScraper:
         }
 
     async def get_paper_details(self, detail_url: str) -> Dict[str, str]:
+        try:
+            meta = await self._fetch_detail_metadata_direct(detail_url)
+            return self._metadata_to_details(meta, detail_url)
+        except Exception as e:
+            print(f"[IEEE] Direct detail GET failed ({e}); falling back to browser detail.")
+
         if not self.page:
             await self.initialize()
 
@@ -360,9 +712,6 @@ class IEEEScraper:
             return {"error": str(e)}
 
     async def download_paper(self, detail_url: str, output_dir: str) -> str:
-        if not self.page:
-            await self.initialize()
-            
         os.makedirs(output_dir, exist_ok=True)
         
         # We find the arnumber directly from the URL e.g. /document/11007439/
@@ -370,6 +719,14 @@ class IEEEScraper:
         if not match:
             return "Could not find arnumber in detail_url."
         arnumber = match.group(1)
+
+        try:
+            return await self._download_paper_direct(detail_url, output_dir, arnumber)
+        except Exception as e:
+            print(f"[IEEE] Direct PDF request failed ({e}); falling back to browser download.")
+
+        if not self.page:
+            await self.initialize()
         
         # Use the direct PDF stream URL
         pdf_url = f"https://ieeexplore.ieee.org/stampPDF/getPDF.jsp?tp=&arnumber={arnumber}"
@@ -427,7 +784,37 @@ class IEEEScraper:
                 download_event_task.cancel()
                 
             if not is_downloaded:
-                return "Error downloading IEEE PDF: Timeout 60s exceeded waiting for download event or stream."
+                # Classify WHY: a paywalled / no-entitlement document serves an
+                # HTML access page from getPDF.jsp instead of a PDF stream; a
+                # Cloudflare/WAF challenge serves its own interstitial. Capture
+                # what we actually landed on so this stops being a blind timeout.
+                try:
+                    cur_url = self.page.url
+                    title = await self.page.title()
+                    html = await self.page.content()
+                except Exception:
+                    cur_url, title, html = "?", "?", ""
+                low = html.lower()
+                if any(s in title or s in html for s in ("Just a moment", "Attention Required", "Cloudflare")) or "cf-challenge" in low:
+                    reason = "Cloudflare/WAF challenge page"
+                elif any(s in html for s in ("Purchase", "Get Access", "subscribe", "Sign In to Continue", "institutional access")) and "%PDF" not in html:
+                    reason = "paywalled / no entitlement (IEEE served an access page, not a PDF)"
+                else:
+                    reason = "no download event and no PDF stream (page structure may have changed)"
+                try:
+                    os.makedirs("scratch", exist_ok=True)
+                    import time as _t
+                    _dp = os.path.join("scratch", f"ieee_dl_fail_{arnumber}_{int(_t.time())}.html")
+                    with open(_dp, "w", encoding="utf-8") as _f:
+                        _f.write(f"<!-- arnumber={arnumber} pdf_url={pdf_url} landed={cur_url} title={title!r} reason={reason} -->\n")
+                        _f.write(html)
+                except Exception:
+                    _dp = "(dump failed)"
+                return (
+                    f"Error downloading IEEE PDF (arnumber {arnumber}): {reason}. "
+                    f"Landed on {cur_url[:120]!r} (title={title[:80]!r}). "
+                    f"HTML dumped to {_dp}."
+                )
                 
             # Additional size verify
             if os.path.getsize(file_path) < 70000:
