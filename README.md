@@ -229,16 +229,21 @@ Downloads the PDF. If the file is already on disk under
 On a fresh download, it is written into the canonical location AND
 mirrored to `output_dir`. Returns the local filesystem path.
 
-ACM and SD now prefer request-level retrieval once a verified browser
-session exists. ACM tries the DOI PDF endpoint with verified cookies and
-classifies papers whose detail page exposes no PDF link as unavailable
-rather than failed.
+The current download stack is request-first. For protected platforms, the
+browser is used to establish a valid verification state and, when the site
+requires it, to reach the page state that mints a signed asset URL. The
+actual data path then uses direct HTTP, in-page `fetch`, response-body
+capture, or Playwright's download event instead of button-click automation.
 
-SD search/details use direct HTTP where possible; PDF download navigates
-only far enough to obtain/trigger the signed ScienceDirect asset URL, then
-saves the PDF through programmatic download/body capture. After the PDF
-host challenge has been solved once in the visible browser, fresh SD PDFs
-typically save in a few seconds instead of timing out in the viewer.
+Platform-specific behavior:
+
+- `ACM`: attempts the DOI PDF endpoint with verified cookies. If both the
+  detail page and `/doi/pdf/...` expose only abstract HTML, the item is
+  classified as `unavailable` instead of a scraper failure.
+- `SD`: search/details prefer direct HTTP. PDF retrieval navigates only far
+  enough to trigger the signed ScienceDirect asset stream, then saves bytes
+  through programmatic download/body capture. A solved PDF-host challenge
+  can be reused by later requests until the publisher invalidates the token.
 
 ### `read_paper_content(url, output_dir, platform="CNKI")`
 
@@ -456,23 +461,36 @@ PowerShell equivalents (`library_web_start.ps1` /
 
 ---
 
-## Validation snapshot
+## Validation and performance
 
-Latest cold-result smoke run: `scratch/full_platform_test.py`,
-run id `20260614_full_final`, 3 download attempts per platform where
-downloads apply. Hard failures: **0**. Unavailable rows are publisher or
-tool semantics, not scraper exceptions.
+Latest integration smoke run: `scratch/full_platform_test.py`, run id
+`20260614_full_final` (2026-06-14). Each downloadable platform was tested
+with up to three fresh sample downloads. The run completed with **0 hard
+failures**. `unavailable` means the publisher or the tool semantics did
+not expose a downloadable PDF for that sample; it is not counted as a
+transport or parser failure.
 
-| Platform | Search | Details | Download result | Read result |
-| -------- | ------: | ------: | --------------- | ----------- |
+| Platform | Search | Details | Download classification | Read |
+| -------- | -----: | ------: | ----------------------- | ---: |
 | `ARXIV`  | 6.584 s | 4.976 s | 3/3 OK: 15.065, 12.841, 10.203 s | success, 20.405 s |
 | `CNKI`   | 1.587 s | 0.198 s | 3/3 OK: 1.488, 1.479, 1.325 s | success, 2.178 s |
 | `IEEE`   | 4.165 s | 1.149 s | 3/3 OK: 29.498, 8.352, 2.809 s | success, 36.236 s |
-| `ACM`    | 25.385 s | 3.034 s | 3/3 unavailable: tested articles expose no PDF link | unavailable |
+| `ACM`    | 25.385 s | 3.034 s | 3/3 unavailable: sampled articles exposed no PDF link | unavailable |
 | `SD`     | 15.312 s | 4.913 s | 3/3 OK: 4.835, 5.381, 3.819 s | success, 22.149 s |
-| `GS`     | 2.443 s | 0.000 s | not applicable / unavailable by design | not applicable |
+| `GS`     | 2.443 s | 0.000 s | not applicable by design | not applicable |
 | `PATYEE` | 1.695 s | 0.374 s | 1/3 OK, 2/3 unavailable | success, 8.778 s |
 | `DAWEI`  | 2.551 s | 0.755 s | 3/3 OK: 3.115, 3.284, 2.598 s | success, 4.768 s |
+
+Operational notes:
+
+- ACM and SD require valid verification state for some requests. Once the
+  visible challenge has been solved, subsequent retrievals reuse the stored
+  browser identity and cookies where the publisher accepts them.
+- SD PDF success depends on the separate `pdf.sciencedirectassets.com`
+  challenge as well as the ScienceDirect detail-page DataDome state.
+- Google Scholar is search-oriented in this server; PDF download/read is
+  intentionally reported as not applicable unless a downstream source is
+  added for a specific result.
 
 ---
 
@@ -495,6 +513,8 @@ tool semantics, not scraper exceptions.
 
 - `scratch/` is git-ignored. Debug scripts, dump HTML, screenshots, etc.
   belong there.
+- Local handoff notes (`HANDOFF.md`, `NEXT_SESSION_PROMPT.md`) are ignored
+  and should not be committed.
 - `.{platform}_profile/`, suffixed profile dirs such as
   `.sd_profile_codex/`, `.repo/`, `.venv/`, `.env` are all git-ignored.
 - The `*_scraper.py` modules export a `scraper_instance` singleton

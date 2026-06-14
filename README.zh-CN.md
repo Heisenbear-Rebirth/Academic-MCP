@@ -217,15 +217,19 @@ MYSQL_DATABASE=academic_mcp
 `output_dir`。新下载时同时写入仓库正式位置 **和** 镜像给调用方。
 返回本地文件路径。
 
-ACM 和 SD 在拿到浏览器验证态后，会优先走请求级获取。ACM 会用
-验证 cookies 请求 DOI PDF 端点；如果详情页本身不暴露 PDF 链接，
-并且 `/doi/pdf/...` 也回到摘要 HTML，就归类为 unavailable，而不是
-程序失败。
+当前下载栈是 request-first。对有反爬验证的平台，浏览器主要用于建立
+合法验证态；如果站点要求动态生成签名资源 URL，则浏览器只推进到能
+产生该 URL 的页面状态。实际数据获取优先使用直接 HTTP、页内 `fetch`、
+响应体捕获或 Playwright download 事件，而不是依赖按钮点击自动化。
 
-SD 的搜索 / 详情优先走直接 HTTP；PDF 下载只用浏览器推进到能拿到
-或触发签名 ScienceDirect asset URL 的位置，之后通过程序侧 download
-事件 / 响应体捕获保存 PDF。PDF host 的挑战人工点过一次后，新 PDF
-通常几秒内就能保存，不再卡在 viewer 里等超时。
+平台差异：
+
+- `ACM`：使用验证 cookies 请求 DOI PDF 端点。如果详情页和
+  `/doi/pdf/...` 都只暴露摘要 HTML，则归类为 `unavailable`，不视为
+  scraper 失败。
+- `SD`：搜索 / 详情优先走直接 HTTP。PDF 下载只导航到能触发签名
+  ScienceDirect asset 流的位置，随后通过程序侧 download / 响应体捕获
+  保存字节。PDF host 的挑战一旦通过，可在出版方令牌失效前被后续请求复用。
 
 ### `read_paper_content(url, output_dir, platform="CNKI")`
 
@@ -425,22 +429,32 @@ PowerShell 版本（`library_web_start.ps1` / `library_web_stop.ps1`）
 
 ---
 
-## 验证快照
+## 验证与性能
 
-最近一次全平台冒烟测试：`scratch/full_platform_test.py`，run id
-`20260614_full_final`；支持下载的平台每个平台 3 个下载样本。硬失败：
-**0**。表里的 unavailable 是出版方 / 工具语义状态，不是 scraper 异常。
+最近一次集成冒烟测试：`scratch/full_platform_test.py`，run id
+`20260614_full_final`（2026-06-14）。支持下载的平台最多各测 3 个新
+样本下载。该轮硬失败为 **0**。`unavailable` 表示出版方或工具语义
+没有为该样本暴露可下载 PDF，不计为传输或解析失败。
 
-| 平台 | 搜索 | 详情 | 下载结果 | 阅读结果 |
-| ---- | ---: | ---: | -------- | -------- |
+| 平台 | 搜索 | 详情 | 下载分类 | 阅读 |
+| ---- | ---: | ---: | -------- | ---: |
 | `ARXIV`  | 6.584 s | 4.976 s | 3/3 OK：15.065、12.841、10.203 s | success，20.405 s |
 | `CNKI`   | 1.587 s | 0.198 s | 3/3 OK：1.488、1.479、1.325 s | success，2.178 s |
 | `IEEE`   | 4.165 s | 1.149 s | 3/3 OK：29.498、8.352、2.809 s | success，36.236 s |
-| `ACM`    | 25.385 s | 3.034 s | 3/3 unavailable：测试文章不暴露 PDF 链接 | unavailable |
+| `ACM`    | 25.385 s | 3.034 s | 3/3 unavailable：样本文章不暴露 PDF 链接 | unavailable |
 | `SD`     | 15.312 s | 4.913 s | 3/3 OK：4.835、5.381、3.819 s | success，22.149 s |
-| `GS`     | 2.443 s | 0.000 s | 设计上不适用 / unavailable | not applicable |
+| `GS`     | 2.443 s | 0.000 s | 设计上不适用 | not applicable |
 | `PATYEE` | 1.695 s | 0.374 s | 1/3 OK，2/3 unavailable | success，8.778 s |
 | `DAWEI`  | 2.551 s | 0.755 s | 3/3 OK：3.115、3.284、2.598 s | success，4.768 s |
+
+运行说明：
+
+- ACM 和 SD 的部分请求需要有效验证态。可见挑战通过后，后续请求会在
+  出版方接受的前提下复用已保存的浏览器身份和 cookies。
+- SD PDF 成功率同时受 ScienceDirect 详情页 DataDome 状态和
+  `pdf.sciencedirectassets.com` 的独立挑战影响。
+- Google Scholar 在本服务中定位为搜索入口；除非后续为某个结果接入
+  下游全文源，否则下载 / 阅读按 not applicable 返回。
 
 ---
 
@@ -462,6 +476,8 @@ PowerShell 版本（`library_web_start.ps1` / `library_web_stop.ps1`）
 ## 项目约定
 
 - `scratch/` 已 git-ignore。调试脚本、抓回的 HTML、截图都放这。
+- 本地交接笔记（`HANDOFF.md`、`NEXT_SESSION_PROMPT.md`）已忽略，
+  不应进入提交。
 - `.{platform}_profile/`、`.sd_profile_codex/` 这类带后缀的 profile
   目录、`.repo/`、`.venv/`、`.env` 全部 git-ignore。
 - 各 `*_scraper.py` 模块导出一个 `scraper_instance` 单例

@@ -52,6 +52,8 @@ tmp/
 test_*_logs.txt
 test_prefs.pdf
 sd_debug_*.png
+HANDOFF.md
+NEXT_SESSION_PROMPT.md
 
 # Local settings / IDE
 .vscode/
