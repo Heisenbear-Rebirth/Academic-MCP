@@ -269,18 +269,32 @@ async def read_paper_content(url: str, output_dir: str, platform: str = "CNKI") 
 
     # 1) MD already in library: mirror MD + images to caller's output_dir.
     if cached and cached.get("md_path") and os.path.exists(cached["md_path"]):
-        mirrored_md = lib.mirror_markdown_to(Path(cached["md_path"]), output_dir)
-        preview = ""
-        try:
-            preview = Path(mirrored_md).read_text(encoding="utf-8")[:1000]
-        except Exception:
-            pass
-        return f"Markdown generation complete. Saved to: {mirrored_md}\n\nPreview:\n{preview}... (library cache hit)"
+        md_path = Path(cached["md_path"])
+        cached_pdf = cached.get("pdf_path")
+        cached_md_is_low_signal = False
+        if cached_pdf and os.path.exists(cached_pdf):
+            try:
+                from pdf_utils import markdown_is_low_signal
+                cached_md_is_low_signal = markdown_is_low_signal(
+                    md_path.read_text(encoding="utf-8", errors="ignore")
+                )
+            except Exception as e:
+                print(f"[Library] Cached Markdown quality check failed: {e}")
+        if cached_md_is_low_signal:
+            print(f"[Library] Cached Markdown is low-signal; reconverting PDF for {norm}:{native_id}.")
+        else:
+            mirrored_md = lib.mirror_markdown_to(md_path, output_dir)
+            preview = ""
+            try:
+                preview = Path(mirrored_md).read_text(encoding="utf-8")[:1000]
+            except Exception:
+                pass
+            return f"Markdown generation complete. Saved to: {mirrored_md}\n\nPreview:\n{preview}... (library cache hit)"
 
     canonical_dir = lib.canonical_dir(norm, native_id)
     canonical_dir.mkdir(parents=True, exist_ok=True)
 
-    # 2) PDF cached but MD missing: just convert.
+    # 2) PDF cached but MD missing or cached MD failed the quality gate: convert.
     if cached and cached.get("pdf_path") and os.path.exists(cached["pdf_path"]):
         try:
             from pdf_utils import convert_pdf_to_markdown

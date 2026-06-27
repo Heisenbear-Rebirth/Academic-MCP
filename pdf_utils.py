@@ -37,12 +37,101 @@ def safe_stem(name: str, default: str = "document") -> str:
 _MD_STRUCTURAL = set("#*->|`[]()!_ \t\r\n")
 
 
+def _is_known_boilerplate_line(line: str) -> bool:
+    compact = re.sub(r"\s+", " ", line or "").strip()
+    low = compact.lower()
+    if not compact:
+        return False
+    if (
+        "authorized licensed use limited to:" in low
+        and "ieee xplore" in low
+        and "restrictions apply" in low
+    ):
+        return True
+    return False
+
+
+def _strip_known_boilerplate(md_text: str) -> str:
+    lines = [
+        line.rstrip()
+        for line in (md_text or "").splitlines()
+        if not _is_known_boilerplate_line(line)
+    ]
+    cleaned = "\n".join(lines)
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned).strip()
+    return f"{cleaned}\n" if cleaned else ""
+
+
+def _effective_content_text(md_text: str) -> str:
+    cleaned = _strip_known_boilerplate(md_text)
+    cleaned = re.sub(r"!\[[^\]]*\]\([^)]+\)", " ", cleaned)
+    return "".join(re.findall(r"[A-Za-z0-9\u4e00-\u9fff]+", cleaned))
+
+
 def _text_is_unusable(md_text: str, *, threshold: float = 0.30) -> bool:
-    content = [c for c in md_text if c not in _MD_STRUCTURAL]
+    cleaned = _strip_known_boilerplate(md_text)
+    content = [c for c in cleaned if c not in _MD_STRUCTURAL]
     if not content:
         return True
     fffd = sum(1 for c in content if c == "�")
     return (fffd / len(content)) > threshold
+
+
+def markdown_is_low_signal(md_text: str, *, min_effective_chars: int = 120) -> bool:
+    """Return True when Markdown contains no useful body text.
+
+    This catches publisher-watermark-only conversions, notably old IEEE PDFs
+    where pymupdf4llm may keep the authorization footer but drop the article
+    body even though PyMuPDF can still extract it.
+    """
+    if _text_is_unusable(md_text):
+        return True
+    return len(_effective_content_text(md_text)) < min_effective_chars
+
+
+def _native_text_markdown(pdf: Path) -> str:
+    stem = safe_stem(pdf.name)
+    doc = fitz.open(str(pdf))
+    try:
+        lines = [
+            f"# {stem}",
+            "",
+            "> Primary layout extraction produced no usable body text; this file was converted with PyMuPDF native text extraction.",
+            "",
+        ]
+        for page_index, page in enumerate(doc, start=1):
+            text = page.get_text("text", sort=True) or ""
+            text = _strip_known_boilerplate(text)
+            text = re.sub(r"[ \t]+\n", "\n", text)
+            text = re.sub(r"\n{3,}", "\n\n", text).strip()
+            if not text:
+                continue
+            lines.extend([f"## Page {page_index}", "", text, ""])
+        md_text = "\n".join(lines).strip()
+        return f"{md_text}\n" if md_text else ""
+    finally:
+        doc.close()
+
+
+def _page_images_markdown(pdf: Path, images: Path, image_format: str, note: str) -> str:
+    stem = safe_stem(pdf.name)
+    doc = fitz.open(str(pdf))
+    try:
+        lines = [
+            f"# {stem}",
+            "",
+            note,
+            "",
+        ]
+        for page_index, page in enumerate(doc, start=1):
+            image_name = f"{stem}-page-{page_index:04d}.{image_format}"
+            image_path = images / image_name
+            pix = page.get_pixmap(matrix=fitz.Matrix(2, 2), alpha=False)
+            pix.save(str(image_path))
+            lines.extend([f"## Page {page_index}", "", f"![](images/{image_name})", ""])
+        return "\n".join(lines).strip() + "\n"
+    finally:
+        doc.close()
 
 
 def convert_pdf_to_markdown(pdf_path: str, output_dir: str, *, image_format: str = "png") -> MarkdownConversion:
@@ -64,32 +153,28 @@ def convert_pdf_to_markdown(pdf_path: str, output_dir: str, *, image_format: str
         image_path=str(images),
         image_format=image_format,
     )
+    md_text = _strip_known_boilerplate(md_text)
     image_only = False
+
+    if markdown_is_low_signal(md_text):
+        native_md = _native_text_markdown(pdf)
+        if not markdown_is_low_signal(native_md, min_effective_chars=200):
+            md_text = native_md
+        else:
+            image_only = True
+            garbled = bool(md_text.strip() or native_md.strip())
+            note = (
+                "> The PDF's embedded fonts lack a Unicode mapping, so the text"
+                " layer extracted as garbage; pages were rendered as images instead."
+                if garbled
+                else "> No usable extractable body text was found in this PDF; pages were rendered as images."
+            )
+            md_text = _page_images_markdown(pdf, images, image_format, note)
 
     if not md_text.strip() or _text_is_unusable(md_text):
         image_only = True
-        garbled = bool(md_text.strip())
-        doc = fitz.open(str(pdf))
-        stem = safe_stem(pdf.name)
-        note = (
-            "> The PDF's embedded fonts lack a Unicode mapping, so the text"
-            " layer extracted as garbage; pages were rendered as images instead."
-            if garbled
-            else "> No extractable text was found in this PDF; pages were rendered as images."
-        )
-        lines = [
-            f"# {stem}",
-            "",
-            note,
-            "",
-        ]
-        for page_index, page in enumerate(doc, start=1):
-            image_name = f"{stem}-page-{page_index:04d}.{image_format}"
-            image_path = images / image_name
-            pix = page.get_pixmap(matrix=fitz.Matrix(2, 2), alpha=False)
-            pix.save(str(image_path))
-            lines.extend([f"## Page {page_index}", "", f"![](images/{image_name})", ""])
-        md_text = "\n".join(lines).strip() + "\n"
+        note = "> No usable extractable body text was found in this PDF; pages were rendered as images."
+        md_text = _page_images_markdown(pdf, images, image_format, note)
 
     md_path = out / f"{safe_stem(pdf.name)}.md"
     md_path.write_text(md_text, encoding="utf-8")

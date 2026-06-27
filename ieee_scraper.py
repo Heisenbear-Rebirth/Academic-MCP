@@ -7,7 +7,6 @@ from mcp_logging import safe_stderr_print
 from typing import List, Dict, Optional
 from playwright.async_api import async_playwright
 import bs4
-import pymupdf4llm
 import re
 import hashlib
 import urllib.parse
@@ -833,27 +832,13 @@ class IEEEScraper:
             return f"Downloaded file is not a PDF, conversion not supported. Saved at: {pdf_path}"
             
         try:
-            images_dir = os.path.join(output_dir, "images")
-            os.makedirs(images_dir, exist_ok=True)
-            
-            md_text = pymupdf4llm.to_markdown(
-                doc=pdf_path,
-                write_images=True,
-                image_path=images_dir
-            )
-            
-            base_name = os.path.basename(pdf_path)
-            md_filename = os.path.splitext(base_name)[0] + ".md"
-            md_path = os.path.join(output_dir, md_filename)
-            
-            with open(md_path, "w", encoding="utf-8") as f:
-                f.write(md_text)
-                
-            snippet = md_text[:1000] + "\n...(More Content Available)"
+            from pdf_utils import convert_pdf_to_markdown
+            converted = await asyncio.to_thread(convert_pdf_to_markdown, pdf_path, output_dir)
+            snippet = converted.preview + "\n...(More Content Available)"
             res = (f"=== 转换成功 ===\n"
                    f"PDF已下载: {pdf_path}\n"
                    f"Markdown及高清图像已保存至目录: {output_dir}\n"
-                   f"完整的MD文件路径: {md_path}\n"
+                   f"完整的MD文件路径: {converted.md_path}\n"
                    f"--- 以下为前1000字预览 ---\n\n{snippet}")
             return res
         except Exception as e:
