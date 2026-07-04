@@ -63,6 +63,6 @@ NEXT_SESSION_PROMPT.md
 .claude/
 .DS_Store
 
-# Local library (MySQL + file repo)
+# Local library (MongoDB + file repo)
 .env
 .repo/

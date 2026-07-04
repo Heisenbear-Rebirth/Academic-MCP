@@ -187,7 +187,7 @@ def release_profile(profile_dir: str) -> None:
 # .<plat>_profile (its cookies persist naturally). Concurrent servers fall
 # back to an ephemeral per-PID copy so Firefox never sees two processes on
 # one profile. The expensive auth state (cf_clearance + pinned fingerprint)
-# is shared out-of-band via the MySQL library, not the profile dir.
+# is shared out-of-band via the MongoDB library, not the profile dir.
 
 
 def pooled_profile(base_name: str, platform: str) -> tuple[str, bool]:
@@ -228,7 +228,7 @@ def cleanup_pooled_profile(profile_dir: Optional[str], is_ephemeral: bool) -> No
 
 
 # ---------------------------------------------------------------------------
-# Shared fingerprint + cookies (via the MySQL library)
+# Shared fingerprint + cookies (via the MongoDB library)
 # ---------------------------------------------------------------------------
 
 def load_or_create_fingerprint(platform: str):
@@ -236,7 +236,7 @@ def load_or_create_fingerprint(platform: str):
 
     cf_clearance / DataDome clearance cookies are bound to the browser
     fingerprint; reusing one verification across clients only works if every
-    client presents the same fingerprint. We pin one per platform in MySQL.
+    client presents the same fingerprint. We pin one per platform in MongoDB.
     Returns None if the library is unavailable or anything goes wrong (caller
     then falls back to Camoufox's default per-launch fingerprint).
     """

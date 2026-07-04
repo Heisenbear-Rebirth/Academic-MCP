@@ -5,7 +5,7 @@ beautifulsoup4
 pymupdf4llm
 camoufox[geoip]
 curl_cffi
-PyMySQL
+pymongo
 python-dotenv
 fastapi
 uvicorn[standard]

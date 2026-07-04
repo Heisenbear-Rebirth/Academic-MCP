@@ -21,7 +21,7 @@ and full-text-extraction API on top of eleven academic / patent sources:
 
 Every source is wrapped by a per-platform scraper that surfaces a consistent
 result schema, and every download/conversion is routed through a local
-MySQL-backed library so repeated queries are served from cache, browser
+MongoDB-backed library so repeated queries are served from cache, browser
 state is shared across concurrent MCP clients, and downloaded PDFs/Markdown
 are deduplicated on disk.
 
@@ -43,7 +43,7 @@ useful as a CLI/library on their own.
 │  server.py  —  FastMCP entry, dispatches to per-platform scrapers    │
 │  ┌──────────────────────────┐    ┌────────────────────────────────┐  │
 │  │  Library (library.py)    │◄──►│  Scrapers (11 modules)         │  │
-│  │  MySQL: papers,          │    │  - one Camoufox/Chromium       │  │
+│  │  Mongo: papers,          │    │  - one Camoufox/Chromium       │  │
 │  │         search_queries,  │    │    persistent context per      │  │
 │  │         browser_state    │    │    platform (singleton)        │  │
 │  │  Files: .repo/{platform} │    │  - pooled per-PID profile      │  │
@@ -80,7 +80,7 @@ Every MCP tool call passes through the Library first:
 | `server.py`                  | FastMCP server. Exposes the five MCP tools and wires them through the Library.                    |
 | `runtime_config.py`          | Loads `mcp_runtime_config.json`, resolves project paths, computes profile dirs (with suffix).     |
 | `mcp_logging.py`             | UTF-8-safe stderr printer that doesn't break when the MCP transport is JSON-RPC over stdio.       |
-| `library.py`                 | MySQL DAO for `papers`, `search_queries`, `browser_state` + helpers for filesystem mirroring.     |
+| `library.py`                 | MongoDB DAO for `papers`, `search_queries`, `browser_state` + helpers for filesystem mirroring.   |
 | `scraper_utils.py`           | Shared helpers: `goto_with_retry`, `venue_matches`, profile pool, fingerprint + cookie sharing.   |
 | `pdf_utils.py`               | `convert_pdf_to_markdown()` — uses pymupdf4llm, falls back to per-page images for scanned PDFs.   |
 | `{platform}_scraper.py`      | One module per source. All expose `search_papers / get_paper_details / download_paper / read_paper_content / close`. |
@@ -95,10 +95,10 @@ Every MCP tool call passes through the Library first:
 
 - **Python 3.10+** (tested on 3.11/3.12). 3.10 is the lower bound for the
   PEP 604 union syntax used in a few places.
-- **MySQL 5.5+** locally reachable. The schema is intentionally portable
-  down to 5.5 (`MEDIUMTEXT` instead of `JSON`, ASCII charset on indexed
-  identifier columns, `DATETIME` columns populated via `NOW()` in DML so
-  no `DEFAULT CURRENT_TIMESTAMP` is required).
+- **MongoDB 3.6+** locally reachable (tested against `mongo:4.4` in Docker).
+  Collections and their indexes are created automatically on first start;
+  JSON-shaped fields (`keywords`, `extra`, `results`, `filters`, `cookies`,
+  `fingerprint`) are stored as native BSON documents/arrays.
 - **Camoufox kernel** (auto-fetched into `%LOCALAPPDATA%\camoufox` on
   Windows; under `~/.cache/camoufox` on Linux).
 
@@ -114,18 +114,21 @@ pip install -r requirements.txt
 python -m camoufox fetch          # downloads the patched Firefox kernel
 ```
 
-Create `.env` from `.env.example` and fill in your MySQL credentials:
+Create `.env` from `.env.example` and point it at your MongoDB:
 
 ```dotenv
-MYSQL_HOST=127.0.0.1
-MYSQL_PORT=3306
-MYSQL_USER=root
-MYSQL_PASSWORD=...
-MYSQL_DATABASE=academic_mcp
+# Full connection URI (recommended — supports auth / replica sets / options)
+MONGODB_URI=mongodb://127.0.0.1:27017
+MONGODB_DATABASE=academic_mcp
+# For an auth-enabled server, include the credentials + authSource, e.g.
+# MONGODB_URI=mongodb://user:pass@127.0.0.1:27017/?authSource=admin
 ```
 
-The library auto-creates the database and the three tables on first start.
-If MySQL is unreachable the Library disables itself with a clear warning
+Alternatively, leave `MONGODB_URI` unset and provide discrete
+`MONGODB_HOST` / `MONGODB_PORT` / `MONGODB_USER` / `MONGODB_PASSWORD` parts.
+
+The library creates the database, collections and indexes on first start.
+If MongoDB is unreachable the Library disables itself with a clear warning
 and the server falls back to passthrough mode (no caching, no shared
 browser state — but everything still works).
 
@@ -143,12 +146,12 @@ browser state — but everything still works).
 | `allow_headful_fallback`              | bool    | `false`          | Master switch: on anti-bot block, may we relaunch with a visible browser for human verification? |
 | `allow_headful_fallback_platforms`    | list    | `["ACM","SD","AIAA","WOS"]` | Subset of platforms allowed to do the headful CAPTCHA fallback.                         |
 | `manual_verification_timeout_seconds` | int     | `180`            | How long we wait (in headful mode) for a human to click through the CAPTCHA.            |
-| `library_enabled`                     | bool    | `true`           | Master switch for the MySQL+filesystem Library. Set to `false` to disable caching.      |
+| `library_enabled`                     | bool    | `true`           | Master switch for the MongoDB+filesystem Library. Set to `false` to disable caching.    |
 | `library_root`                        | string  | `".repo"`        | Where canonical PDFs/MD/images live (relative to project root or absolute).             |
 | `library_web_host` / `library_web_port` | string/int | `127.0.0.1:5577` | Bind address for the management console.                                              |
 | `profile_suffix`                      | string  | `""`             | Optional shared suffix; per-client override via `MCP_PROFILE_SUFFIX` env var (see below). |
 
-Secrets live in `.env` (gitignored). Only MySQL credentials so far.
+Secrets live in `.env` (gitignored). Only the MongoDB connection so far.
 
 ---
 
@@ -191,7 +194,7 @@ appear to the LLM with the docstrings preserved verbatim.
       "detail_link": "https://..."
     }
   ],
-  "_cache_hit": true                  // server-only flag; true when served from MySQL cache
+  "_cache_hit": true                  // server-only flag; true when served from MongoDB cache
 }
 ```
 
@@ -295,32 +298,35 @@ same image-extraction pipeline. Does not touch the Library.
 
 ---
 
-## The Library (MySQL + filesystem)
+## The Library (MongoDB + filesystem)
 
-### Schema
+### Collections
 
 ```
-papers          (platform, native_id) -> unique key
+papers          unique index (platform, native_id); integer `id` (web UI)
                 title, author, source, venue_name, pub_date, db_type, doi,
-                detail_link, abstract, keywords (json text),
-                pdf_path, md_path, images_dir, extra (json text),
+                detail_link, abstract, keywords (array),
+                pdf_path, md_path, images_dir, extra (subdocument),
                 ris_text (platform-native or synthesized RIS export),
                 created_at, updated_at
 
-search_queries  (platform, md5(query + filters)) -> unique key
-                query_text, filters (json text), total_results,
-                results (json text), fetched_at
+search_queries  unique index (platform, md5(query + filters)); integer `id`
+                query_text, filters (subdocument), total_results,
+                results (array of subdocuments), fetched_at
 
-browser_state   platform PRIMARY KEY
-                fingerprint (pickled+b64 BrowserForge Fingerprint),
-                cookies     (json: Playwright context.cookies()),
+browser_state   _id == platform
+                fingerprint (subdocument: BrowserForge Fingerprint),
+                cookies     (array: Playwright context.cookies()),
                 user_agent, verified_at, updated_at, note
+
+counters        _id == collection name; seq -> emulates AUTO_INCREMENT so the
+                integer `id` the web UI relies on stays stable.
 ```
 
-All JSON-shaped columns are `MEDIUMTEXT` so the schema works unchanged on
-MySQL 5.5+. ASCII charset is pinned on indexed identifier columns
-(`native_id`, `query_hash`) to stay inside InnoDB's 767-byte prefix limit
-under `utf8mb4`.
+JSON-shaped fields are stored as native BSON documents/arrays (no more
+text round-tripping). The integer `id` on `papers`/`search_queries` is
+assigned from the `counters` collection only on genuine inserts, so the
+web UI's numeric paper-export / search-delete keys stay stable.
 
 ### Filesystem layout
 
@@ -564,7 +570,7 @@ Operational notes:
 | ACM download returns unavailable                                      | The article page and `/doi/pdf/...` endpoint redirect to abstract HTML with no PDF link. | Treated as publisher-unavailable, not a scraper failure. Try a different ACM article/DOI.                         |
 | `_cache_hit=true` but the result looks stale                         | Permanent search cache returned a fossil row.                         | `/searches` → delete the row, re-run the search.                                                                   |
 | `journal=` filter returned 0 results on CNKI                         | CNKI relevance ordering may not surface the target journal in page 1. | Increase `limit`, narrow the query, or accept that CNKI's cross-journal coverage is sparse for general queries.    |
-| Library disabled at startup (`[Library] Disabled: ...`)              | MySQL config missing / wrong / unreachable.                           | Check `.env`. The server still runs in passthrough mode — caching and shared state are just turned off.            |
+| Library disabled at startup (`[Library] Disabled: ...`)              | MongoDB config missing / wrong / unreachable.                         | Check `.env`. The server still runs in passthrough mode — caching and shared state are just turned off.            |
 
 ---
 

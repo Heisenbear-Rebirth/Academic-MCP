@@ -1,11 +1,11 @@
-"""Local academic library: MySQL-backed metadata + canonical file repository.
+"""Local academic library: MongoDB-backed metadata + canonical file repository.
 
 Design summary:
 - Identity per (platform, native_id). Native ID is extracted from the detail URL.
 - All downloaded PDFs / generated Markdown live under {library_root}/{platform}/{safe_id}/.
 - On cache miss, the scraper writes into the canonical dir; on hit, files are mirrored to the caller's
   requested output_dir so the existing MCP contract (returns paths under output_dir) is preserved.
-- If MySQL is unreachable, the library degrades to a no-op (transparent pass-through to scrapers).
+- If MongoDB is unreachable, the library degrades to a no-op (transparent pass-through to scrapers).
 """
 from __future__ import annotations
 
@@ -17,15 +17,19 @@ import re
 import shutil
 import threading
 import urllib.parse
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 try:
-    import pymysql
-    from pymysql.cursors import DictCursor
+    import pymongo
+    from pymongo import MongoClient, ReturnDocument
+    from pymongo.errors import PyMongoError
 except Exception:  # pragma: no cover - import-time guard
-    pymysql = None
-    DictCursor = None
+    pymongo = None
+    MongoClient = None
+    ReturnDocument = None
+    PyMongoError = Exception
 
 try:
     from dotenv import load_dotenv
@@ -223,7 +227,7 @@ def search_result_is_cacheable(results: Any) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# MySQL connection management
+# MongoDB connection management
 # ---------------------------------------------------------------------------
 
 class _LibraryUnavailable(Exception):
@@ -231,126 +235,80 @@ class _LibraryUnavailable(Exception):
 
 
 class Library:
-    """MySQL + filesystem academic cache.
+    """MongoDB + filesystem academic cache.
 
-    The first call to :meth:`ensure_ready` initialises the schema and the file root.
-    If initialisation fails (no driver, no .env, MySQL down, etc.) the library is
-    marked disabled and every method becomes a graceful no-op.
+    The first call to :meth:`ensure_ready` connects to MongoDB, verifies the
+    indexes and the file root. If initialisation fails (no driver, no .env,
+    Mongo down, etc.) the library is marked disabled and every method becomes a
+    graceful no-op.
     """
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._ready = False
         self._disabled_reason: Optional[str] = None
-        self._conn_kwargs: Optional[Dict[str, Any]] = None
+        self._client = None
+        self._db = None
 
     # -- Lifecycle ------------------------------------------------------
 
-    def _load_conn_kwargs(self) -> Dict[str, Any]:
-        if not pymysql:
-            raise _LibraryUnavailable("PyMySQL is not installed. Run `pip install -r requirements.txt`.")
-        host = os.getenv("MYSQL_HOST")
-        if not host:
-            raise _LibraryUnavailable("MYSQL_HOST is not set. Copy .env.example to .env and fill in credentials.")
-        return {
-            "host": host,
-            "port": int(os.getenv("MYSQL_PORT", "3306")),
-            "user": os.getenv("MYSQL_USER", "root"),
-            "password": os.getenv("MYSQL_PASSWORD", ""),
-            "database": os.getenv("MYSQL_DATABASE", "academic_mcp"),
-            "charset": "utf8mb4",
-            "autocommit": True,
-            "cursorclass": DictCursor,
-        }
+    def _load_mongo_config(self) -> Tuple[str, str]:
+        """Resolve (connection_uri, database_name) from the environment.
 
-    def _ensure_database(self) -> None:
-        """Create the target database if it does not exist."""
-        kwargs = dict(self._conn_kwargs)  # type: ignore[arg-type]
-        db_name = kwargs.pop("database")
-        conn = pymysql.connect(**kwargs)
-        try:
-            with conn.cursor() as cur:
-                cur.execute(
-                    f"CREATE DATABASE IF NOT EXISTS `{db_name}` "
-                    "CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
-                )
-        finally:
-            conn.close()
+        A full ``MONGODB_URI`` takes precedence; otherwise a URI is assembled
+        from discrete host/port/user/password vars so simple local setups only
+        need ``MONGODB_HOST``.
+        """
+        if not pymongo:
+            raise _LibraryUnavailable("pymongo is not installed. Run `pip install -r requirements.txt`.")
+        uri = os.getenv("MONGODB_URI") or os.getenv("MONGO_URI")
+        host = os.getenv("MONGODB_HOST") or os.getenv("MONGO_HOST")
+        if not uri and not host:
+            raise _LibraryUnavailable(
+                "MONGODB_URI (or MONGODB_HOST) is not set. Copy .env.example to .env and fill in credentials."
+            )
+        if not uri:
+            port = int(os.getenv("MONGODB_PORT", os.getenv("MONGO_PORT", "27017")))
+            user = os.getenv("MONGODB_USER") or os.getenv("MONGO_USER")
+            password = os.getenv("MONGODB_PASSWORD") or os.getenv("MONGO_PASSWORD")
+            if user:
+                cred = f"{urllib.parse.quote_plus(user)}:{urllib.parse.quote_plus(password or '')}@"
+            else:
+                cred = ""
+            uri = f"mongodb://{cred}{host}:{port}"
+        db_name = os.getenv("MONGODB_DATABASE") or os.getenv("MONGO_DATABASE") or "academic_mcp"
+        return uri, db_name
 
-    def _ensure_schema(self) -> None:
-        # Schema is intentionally portable down to MySQL 5.5: MEDIUMTEXT instead of JSON,
-        # ASCII charset on indexed identifier columns (so the unique key stays inside
-        # InnoDB's 767-byte prefix limit), and DATETIME columns filled via NOW() in DML.
-        with self._connect() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    CREATE TABLE IF NOT EXISTS papers (
-                        id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
-                        platform VARCHAR(32) NOT NULL,
-                        native_id VARCHAR(255) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
-                        title TEXT,
-                        author TEXT,
-                        source TEXT,
-                        venue_name VARCHAR(512),
-                        pub_date VARCHAR(64),
-                        db_type VARCHAR(64),
-                        doi VARCHAR(255),
-                        detail_link TEXT,
-                        abstract MEDIUMTEXT,
-                        keywords MEDIUMTEXT,
-                        pdf_path VARCHAR(512),
-                        md_path VARCHAR(512),
-                        images_dir VARCHAR(512),
-                        extra MEDIUMTEXT,
-                        ris_text MEDIUMTEXT,
-                        created_at DATETIME NULL,
-                        updated_at DATETIME NULL,
-                        UNIQUE KEY uniq_platform_native (platform, native_id)
-                    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-                    """
-                )
-                # Defensive migrations for installations that pre-date later columns.
-                for ddl in (
-                    "ALTER TABLE papers ADD COLUMN venue_name VARCHAR(512) AFTER source",
-                    "ALTER TABLE papers ADD COLUMN ris_text MEDIUMTEXT AFTER extra",
-                ):
-                    try:
-                        cur.execute(ddl)
-                    except pymysql.err.OperationalError as e:
-                        if e.args[0] != 1060:  # 1060 = Duplicate column name (already migrated)
-                            raise
-                cur.execute(
-                    """
-                    CREATE TABLE IF NOT EXISTS search_queries (
-                        id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
-                        platform VARCHAR(32) NOT NULL,
-                        query_hash CHAR(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
-                        query_text TEXT,
-                        filters MEDIUMTEXT,
-                        total_results VARCHAR(64),
-                        results MEDIUMTEXT,
-                        fetched_at DATETIME NULL,
-                        UNIQUE KEY uniq_platform_hash (platform, query_hash)
-                    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-                    """
-                )
-                # Shared browser auth state so N concurrent MCP clients can reuse one
-                # manual verification: pinned Camoufox fingerprint + cf_clearance/DataDome
-                # cookies live here, not in any single profile dir.
-                cur.execute(
-                    """
-                    CREATE TABLE IF NOT EXISTS browser_state (
-                        platform VARCHAR(32) NOT NULL PRIMARY KEY,
-                        fingerprint MEDIUMTEXT,
-                        cookies MEDIUMTEXT,
-                        user_agent VARCHAR(512),
-                        verified_at DATETIME NULL,
-                        updated_at DATETIME NULL,
-                        note VARCHAR(255)
-                    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-                    """
-                )
+    def _ensure_indexes(self) -> None:
+        # Collections and documents are created lazily on first write; we only
+        # need to pin the uniqueness + lookup indexes that back the DAO.
+        # JSON-shaped fields (keywords, extra, results, filters, cookies,
+        # fingerprint) are stored as native BSON documents/arrays -- no more
+        # MEDIUMTEXT round-tripping.
+        papers = self._db.papers
+        papers.create_index([("platform", 1), ("native_id", 1)], unique=True, name="uniq_platform_native")
+        papers.create_index([("id", 1)], name="paper_id")
+        papers.create_index([("updated_at", -1)], name="paper_updated")
+        searches = self._db.search_queries
+        searches.create_index([("platform", 1), ("query_hash", 1)], unique=True, name="uniq_platform_hash")
+        searches.create_index([("id", 1)], name="search_id")
+        searches.create_index([("fetched_at", -1)], name="search_fetched")
+        # browser_state is keyed by _id == platform, so it needs no extra index.
+
+    def _next_id(self, name: str) -> int:
+        """Emulate a SQL AUTO_INCREMENT sequence via an atomic counters doc.
+
+        Used to keep the integer ``id`` the web UI relies on (paper export,
+        search deletion) stable and human-friendly. Gaps are impossible because
+        the counter is only advanced on genuine inserts.
+        """
+        doc = self._db.counters.find_one_and_update(
+            {"_id": name},
+            {"$inc": {"seq": 1}},
+            upsert=True,
+            return_document=ReturnDocument.AFTER,
+        )
+        return int(doc["seq"])
 
     def ensure_ready(self) -> bool:
         if self._ready or self._disabled_reason:
@@ -363,9 +321,12 @@ class Library:
                 print(f"[Library] Disabled: {self._disabled_reason}")
                 return False
             try:
-                self._conn_kwargs = self._load_conn_kwargs()
-                self._ensure_database()
-                self._ensure_schema()
+                uri, db_name = self._load_mongo_config()
+                client = MongoClient(uri, serverSelectionTimeoutMS=3000, tz_aware=False)
+                client.admin.command("ping")  # fail fast if Mongo is unreachable
+                self._client = client
+                self._db = client[db_name]
+                self._ensure_indexes()
                 library_root_path().mkdir(parents=True, exist_ok=True)
             except _LibraryUnavailable as e:
                 self._disabled_reason = str(e)
@@ -376,12 +337,8 @@ class Library:
                 print(f"[Library] Disabled after init failure: {self._disabled_reason}")
                 return False
             self._ready = True
-            print("[Library] Ready. Schema verified, file root at:", library_root_path())
+            print("[Library] Ready. Mongo indexes verified, file root at:", library_root_path())
             return True
-
-    def _connect(self):
-        assert self._conn_kwargs is not None
-        return pymysql.connect(**self._conn_kwargs)
 
     @property
     def enabled(self) -> bool:
@@ -444,6 +401,9 @@ class Library:
         if not row:
             return {}
         decoded = dict(row)
+        decoded.pop("_id", None)
+        # keywords/extra are normally native BSON now; the str/bytes path only
+        # matters for values that were persisted as encoded JSON.
         for json_field in ("keywords", "extra"):
             value = decoded.get(json_field)
             if isinstance(value, (bytes, bytearray)):
@@ -458,13 +418,9 @@ class Library:
     def get_paper(self, platform: str, native_id: str) -> Optional[Dict[str, Any]]:
         if not self.enabled or not native_id:
             return None
-        with self._connect() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    "SELECT * FROM papers WHERE platform=%s AND native_id=%s LIMIT 1",
-                    ((platform or "").upper(), native_id),
-                )
-                row = cur.fetchone()
+        row = self._db.papers.find_one(
+            {"platform": (platform or "").upper(), "native_id": native_id}
+        )
         return self._row_to_paper(row) if row else None
 
     _PAPER_COLS = (
@@ -476,47 +432,44 @@ class Library:
     def upsert_paper(self, platform: str, native_id: str, **fields: Any) -> None:
         if not self.enabled or not native_id:
             return
-        payload = {"platform": (platform or "").upper(), "native_id": native_id}
-        for col in self._PAPER_COLS:
-            if col in fields and fields[col] is not None:
-                value = fields[col]
-                if col in ("keywords", "extra") and not isinstance(value, str):
-                    value = json.dumps(value, ensure_ascii=False)
-                payload[col] = value
-        cols = list(payload.keys())
-        placeholders = ", ".join(["%s"] * len(cols))
-        updates = ", ".join(
-            f"{c}=VALUES({c})" for c in cols if c not in ("platform", "native_id")
+        platform = (platform or "").upper()
+        # keywords/extra are stored as native BSON documents/arrays.
+        set_fields = {
+            col: fields[col]
+            for col in self._PAPER_COLS
+            if col in fields and fields[col] is not None
+        }
+        now = datetime.now()
+        update = {
+            "$set": {**set_fields, "updated_at": now},
+            "$setOnInsert": {"platform": platform, "native_id": native_id, "created_at": now},
+        }
+        res = self._db.papers.update_one(
+            {"platform": platform, "native_id": native_id}, update, upsert=True
         )
-        update_clause = f"{updates}, updated_at=NOW()" if updates else "updated_at=NOW()"
-        sql = (
-            f"INSERT INTO papers ({', '.join(cols)}, created_at, updated_at) "
-            f"VALUES ({placeholders}, NOW(), NOW()) "
-            f"ON DUPLICATE KEY UPDATE {update_clause}"
-        )
-        with self._connect() as conn:
-            with conn.cursor() as cur:
-                cur.execute(sql, [payload[c] for c in cols])
+        if res.upserted_id is not None:
+            try:
+                self._db.papers.update_one(
+                    {"_id": res.upserted_id}, {"$set": {"id": self._next_id("papers")}}
+                )
+            except PyMongoError:
+                pass
 
     # -- Search cache -------------------------------------------------
 
     def get_search(self, platform: str, query_hash: str) -> Optional[Dict[str, Any]]:
         if not self.enabled:
             return None
-        with self._connect() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    "SELECT total_results, results FROM search_queries "
-                    "WHERE platform=%s AND query_hash=%s LIMIT 1",
-                    ((platform or "").upper(), query_hash),
-                )
-                row = cur.fetchone()
+        row = self._db.search_queries.find_one(
+            {"platform": (platform or "").upper(), "query_hash": query_hash},
+            {"total_results": 1, "results": 1},
+        )
         if not row:
             return None
         results = row.get("results")
         if isinstance(results, (bytes, bytearray)):
             results = results.decode("utf-8", errors="replace")
-        if isinstance(results, str):
+        if isinstance(results, str):  # defensive: encoded-JSON legacy payloads
             try:
                 results = json.loads(results)
             except Exception:
@@ -537,62 +490,86 @@ class Library:
     ) -> None:
         if not self.enabled:
             return
-        with self._connect() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    INSERT INTO search_queries
-                        (platform, query_hash, query_text, filters, total_results, results, fetched_at)
-                    VALUES (%s, %s, %s, %s, %s, %s, NOW())
-                    ON DUPLICATE KEY UPDATE
-                        query_text=VALUES(query_text),
-                        filters=VALUES(filters),
-                        total_results=VALUES(total_results),
-                        results=VALUES(results),
-                        fetched_at=NOW()
-                    """,
-                    (
-                        (platform or "").upper(),
-                        query_hash,
-                        query_text,
-                        json.dumps(filters, ensure_ascii=False, sort_keys=True),
-                        str(total_results) if total_results is not None else "0",
-                        json.dumps(papers or [], ensure_ascii=False),
-                    ),
+        platform = (platform or "").upper()
+        now = datetime.now()
+        # filters/results are stored as native BSON, not JSON strings.
+        update = {
+            "$set": {
+                "query_text": query_text,
+                "filters": filters or {},
+                "total_results": str(total_results) if total_results is not None else "0",
+                "results": papers or [],
+                "fetched_at": now,
+            },
+            "$setOnInsert": {"platform": platform, "query_hash": query_hash},
+        }
+        res = self._db.search_queries.update_one(
+            {"platform": platform, "query_hash": query_hash}, update, upsert=True
+        )
+        if res.upserted_id is not None:
+            try:
+                self._db.search_queries.update_one(
+                    {"_id": res.upserted_id}, {"$set": {"id": self._next_id("search_queries")}}
                 )
+            except PyMongoError:
+                pass
 
     # -- Listing / management (for the web UI) -----------------------
+
+    @staticmethod
+    def _nonempty(field: str) -> Dict[str, Any]:
+        """Aggregation expr: 1 when *field* is present and a non-empty string.
+
+        ``$ifNull`` coalesces both a missing field and an explicit null to "",
+        so the single ``$ne`` cleanly rejects absent/empty values (an aggregation
+        ``$ne`` against a bare field reference does NOT reliably treat a missing
+        field as null).
+        """
+        return {"$cond": [{"$ne": [{"$ifNull": [f"${field}", ""]}, ""]}, 1, 0]}
 
     def stats(self) -> Dict[str, Any]:
         if not self.enabled:
             return {"enabled": False, "platforms": [], "totals": {"papers": 0, "searches": 0}}
-        with self._connect() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    "SELECT platform, COUNT(*) AS c, "
-                    "SUM(CASE WHEN pdf_path IS NOT NULL AND pdf_path<>'' THEN 1 ELSE 0 END) AS pdfs, "
-                    "SUM(CASE WHEN md_path IS NOT NULL AND md_path<>'' THEN 1 ELSE 0 END) AS mds "
-                    "FROM papers GROUP BY platform ORDER BY c DESC"
-                )
-                platforms = [dict(r) for r in cur.fetchall()]
-                cur.execute("SELECT COUNT(*) AS c FROM papers")
-                papers_total = cur.fetchone()["c"]
-                cur.execute("SELECT COUNT(*) AS c FROM search_queries")
-                searches_total = cur.fetchone()["c"]
+        pipeline = [
+            {
+                "$group": {
+                    "_id": "$platform",
+                    "c": {"$sum": 1},
+                    "pdfs": {"$sum": self._nonempty("pdf_path")},
+                    "mds": {"$sum": self._nonempty("md_path")},
+                }
+            },
+            {"$sort": {"c": -1}},
+        ]
+        platforms = [
+            {"platform": r["_id"], "c": r["c"], "pdfs": r["pdfs"], "mds": r["mds"]}
+            for r in self._db.papers.aggregate(pipeline)
+        ]
+        papers_total = self._db.papers.count_documents({})
+        searches_total = self._db.search_queries.count_documents({})
         return {
             "enabled": True,
             "platforms": platforms,
             "totals": {"papers": papers_total, "searches": searches_total},
         }
 
-    # Recognised values for the ``state`` filter on :meth:`list_papers`.
-    # Each maps to a SQL fragment that selects the matching papers.
-    _STATE_FILTERS = {
-        "search_only": "(abstract IS NULL OR abstract='') AND (pdf_path IS NULL OR pdf_path='')",
-        "with_abstract": "(abstract IS NOT NULL AND abstract<>'')",
-        "with_pdf": "(pdf_path IS NOT NULL AND pdf_path<>'')",
-        "with_md": "(md_path IS NOT NULL AND md_path<>'')",
-        "with_ris": "(ris_text IS NOT NULL AND ris_text<>'')",
+    # Recognised values for the ``state`` filter on :meth:`list_papers`. Each maps
+    # to a list of Mongo query clauses ANDed into the overall filter. Note that a
+    # Mongo ``$in: [None, ""]`` query also matches a *missing* field (treated as
+    # null), and ``$nin`` correspondingly excludes it -- matching the SQL
+    # NULL/'' semantics of the original schema.
+    _STATE_CLAUSES = {
+        "search_only": [{"abstract": {"$in": [None, ""]}}, {"pdf_path": {"$in": [None, ""]}}],
+        "with_abstract": [{"abstract": {"$nin": [None, ""]}}],
+        "with_pdf": [{"pdf_path": {"$nin": [None, ""]}}],
+        "with_md": [{"md_path": {"$nin": [None, ""]}}],
+        "with_ris": [{"ris_text": {"$nin": [None, ""]}}],
+    }
+
+    _LIST_PROJECTION = {
+        "id": 1, "platform": 1, "native_id": 1, "title": 1, "author": 1,
+        "pub_date": 1, "db_type": 1, "abstract": 1, "doi": 1, "venue_name": 1,
+        "pdf_path": 1, "md_path": 1, "ris_text": 1, "detail_link": 1, "updated_at": 1,
     }
 
     def list_papers(
@@ -605,115 +582,97 @@ class Library:
     ) -> Dict[str, Any]:
         if not self.enabled:
             return {"rows": [], "total": 0, "page": page, "page_size": page_size}
-        where, params = [], []
+        clauses: List[Dict[str, Any]] = []
         if platform:
-            where.append("platform=%s")
-            params.append(platform.upper())
+            clauses.append({"platform": platform.upper()})
         if keyword:
-            where.append("(title LIKE %s OR author LIKE %s OR native_id LIKE %s)")
-            like = f"%{keyword}%"
-            params.extend([like, like, like])
-        state_sql = self._STATE_FILTERS.get((state or "").strip())
-        if state_sql:
-            where.append(state_sql)
-        clause = ("WHERE " + " AND ".join(where)) if where else ""
+            rx = {"$regex": re.escape(keyword), "$options": "i"}
+            clauses.append({"$or": [{"title": rx}, {"author": rx}, {"native_id": rx}]})
+        clauses.extend(self._STATE_CLAUSES.get((state or "").strip(), []))
+        query: Dict[str, Any] = {"$and": clauses} if clauses else {}
         offset = max(0, (page - 1) * page_size)
-        with self._connect() as conn:
-            with conn.cursor() as cur:
-                cur.execute(f"SELECT COUNT(*) AS c FROM papers {clause}", params)
-                total = cur.fetchone()["c"]
-                cur.execute(
-                    f"SELECT id, platform, native_id, title, author, pub_date, db_type, "
-                    f"abstract, doi, venue_name, pdf_path, md_path, ris_text, detail_link, "
-                    f"updated_at FROM papers {clause} "
-                    f"ORDER BY updated_at DESC LIMIT %s OFFSET %s",
-                    [*params, page_size, offset],
-                )
-                rows = []
-                for r in cur.fetchall():
-                    row = dict(r)
-                    # Flag columns make templating concise without leaking blob payloads.
-                    row["has_abstract"] = bool((row.get("abstract") or "").strip())
-                    row["has_ris"] = bool((row.pop("ris_text", None) or "").strip())
-                    rows.append(row)
+        total = self._db.papers.count_documents(query)
+        cursor = (
+            self._db.papers.find(query, self._LIST_PROJECTION)
+            .sort("updated_at", -1)
+            .skip(offset)
+            .limit(page_size)
+        )
+        rows = []
+        for r in cursor:
+            row = dict(r)
+            row.pop("_id", None)
+            # Flag columns make templating concise without leaking blob payloads.
+            row["has_abstract"] = bool((row.get("abstract") or "").strip())
+            row["has_ris"] = bool((row.pop("ris_text", None) or "").strip())
+            rows.append(row)
         return {"rows": rows, "total": total, "page": page, "page_size": page_size}
 
     def get_paper_ris(self, platform: str, native_id: str) -> Optional[str]:
         if not self.enabled or not native_id:
             return None
-        with self._connect() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    "SELECT ris_text FROM papers WHERE platform=%s AND native_id=%s LIMIT 1",
-                    ((platform or "").upper(), native_id),
-                )
-                row = cur.fetchone()
+        row = self._db.papers.find_one(
+            {"platform": (platform or "").upper(), "native_id": native_id},
+            {"ris_text": 1},
+        )
         return (row or {}).get("ris_text")
 
     def set_paper_ris(self, platform: str, native_id: str, ris_text: str) -> bool:
         if not self.enabled or not native_id or not ris_text:
             return False
-        with self._connect() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    "UPDATE papers SET ris_text=%s, updated_at=NOW() "
-                    "WHERE platform=%s AND native_id=%s",
-                    (ris_text, (platform or "").upper(), native_id),
-                )
-                return cur.rowcount > 0
+        res = self._db.papers.update_one(
+            {"platform": (platform or "").upper(), "native_id": native_id},
+            {"$set": {"ris_text": ris_text, "updated_at": datetime.now()}},
+        )
+        return res.matched_count > 0
 
     def fetch_papers_for_export(self, paper_ids: List[int]) -> List[Dict[str, Any]]:
         """Pull full rows (including ris_text + abstract) for a batch of paper PKs."""
         if not self.enabled or not paper_ids:
             return []
-        placeholders = ",".join(["%s"] * len(paper_ids))
-        with self._connect() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    f"SELECT * FROM papers WHERE id IN ({placeholders}) ORDER BY platform, updated_at DESC",
-                    paper_ids,
-                )
-                rows = [self._row_to_paper(r) for r in cur.fetchall()]
-        return rows
+        ids = [int(i) for i in paper_ids]
+        cursor = self._db.papers.find({"id": {"$in": ids}}).sort(
+            [("platform", 1), ("updated_at", -1)]
+        )
+        return [self._row_to_paper(r) for r in cursor]
 
     def list_searches(self, page: int = 1, page_size: int = 30) -> Dict[str, Any]:
         if not self.enabled:
             return {"rows": [], "total": 0, "page": page, "page_size": page_size}
         offset = max(0, (page - 1) * page_size)
-        with self._connect() as conn:
-            with conn.cursor() as cur:
-                cur.execute("SELECT COUNT(*) AS c FROM search_queries")
-                total = cur.fetchone()["c"]
-                cur.execute(
-                    "SELECT id, platform, query_hash, query_text, filters, total_results, fetched_at "
-                    "FROM search_queries ORDER BY fetched_at DESC LIMIT %s OFFSET %s",
-                    (page_size, offset),
-                )
-                rows = []
-                for r in cur.fetchall():
-                    row = dict(r)
-                    filters = row.get("filters")
-                    if isinstance(filters, (bytes, bytearray)):
-                        filters = filters.decode("utf-8", errors="replace")
-                    if isinstance(filters, str):
-                        try:
-                            row["filters"] = json.loads(filters)
-                        except Exception:
-                            pass
-                    rows.append(row)
+        total = self._db.search_queries.count_documents({})
+        projection = {
+            "id": 1, "platform": 1, "query_hash": 1, "query_text": 1,
+            "filters": 1, "total_results": 1, "fetched_at": 1,
+        }
+        cursor = (
+            self._db.search_queries.find({}, projection)
+            .sort("fetched_at", -1)
+            .skip(offset)
+            .limit(page_size)
+        )
+        rows = []
+        for r in cursor:
+            row = dict(r)
+            row.pop("_id", None)
+            filters = row.get("filters")
+            if isinstance(filters, (bytes, bytearray)):
+                filters = filters.decode("utf-8", errors="replace")
+            if isinstance(filters, str):  # defensive: encoded-JSON legacy payloads
+                try:
+                    row["filters"] = json.loads(filters)
+                except Exception:
+                    pass
+            rows.append(row)
         return {"rows": rows, "total": total, "page": page, "page_size": page_size}
 
     def delete_paper(self, platform: str, native_id: str, *, remove_files: bool = False) -> bool:
         if not self.enabled or not native_id:
             return False
-        paper = self.get_paper(platform, native_id) or {}
-        with self._connect() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    "DELETE FROM papers WHERE platform=%s AND native_id=%s",
-                    ((platform or "").upper(), native_id),
-                )
-                deleted = cur.rowcount > 0
+        res = self._db.papers.delete_one(
+            {"platform": (platform or "").upper(), "native_id": native_id}
+        )
+        deleted = res.deleted_count > 0
         if deleted and remove_files:
             canon = self.canonical_dir(platform, native_id)
             try:
@@ -726,10 +685,8 @@ class Library:
     def delete_search(self, search_id: int) -> bool:
         if not self.enabled:
             return False
-        with self._connect() as conn:
-            with conn.cursor() as cur:
-                cur.execute("DELETE FROM search_queries WHERE id=%s", (int(search_id),))
-                return cur.rowcount > 0
+        res = self._db.search_queries.delete_one({"id": int(search_id)})
+        return res.deleted_count > 0
 
     # -- Shared browser auth state ------------------------------------
 
@@ -749,41 +706,28 @@ class Library:
     def get_browser_state(self, platform: str) -> Optional[Dict[str, Any]]:
         if not self.enabled:
             return None
-        with self._connect() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    "SELECT platform, fingerprint, cookies, user_agent, verified_at, "
-                    "updated_at, note FROM browser_state WHERE platform=%s LIMIT 1",
-                    ((platform or "").upper(),),
-                )
-                row = cur.fetchone()
+        row = self._db.browser_state.find_one({"_id": (platform or "").upper()})
         if not row:
             return None
-        row = dict(row)
-        row["fingerprint"] = self._decode_json_field(row.get("fingerprint"), None)
-        row["cookies"] = self._decode_json_field(row.get("cookies"), [])
-        return row
+        return {
+            "platform": row.get("_id"),
+            "fingerprint": self._decode_json_field(row.get("fingerprint"), None),
+            "cookies": self._decode_json_field(row.get("cookies"), []),
+            "user_agent": row.get("user_agent"),
+            "verified_at": row.get("verified_at"),
+            "updated_at": row.get("updated_at"),
+            "note": row.get("note"),
+        }
 
     def save_browser_fingerprint(self, platform: str, fingerprint: Dict[str, Any], user_agent: str = None) -> None:
         if not self.enabled:
             return
-        with self._connect() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    INSERT INTO browser_state (platform, fingerprint, user_agent, updated_at)
-                    VALUES (%s, %s, %s, NOW())
-                    ON DUPLICATE KEY UPDATE
-                        fingerprint=VALUES(fingerprint),
-                        user_agent=COALESCE(VALUES(user_agent), user_agent),
-                        updated_at=NOW()
-                    """,
-                    (
-                        (platform or "").upper(),
-                        json.dumps(fingerprint, ensure_ascii=False),
-                        user_agent,
-                    ),
-                )
+        set_doc: Dict[str, Any] = {"fingerprint": fingerprint, "updated_at": datetime.now()}
+        if user_agent is not None:  # COALESCE: only overwrite when a new UA is supplied
+            set_doc["user_agent"] = user_agent
+        self._db.browser_state.update_one(
+            {"_id": (platform or "").upper()}, {"$set": set_doc}, upsert=True
+        )
 
     def save_browser_cookies(
         self,
@@ -796,61 +740,46 @@ class Library:
     ) -> None:
         if not self.enabled:
             return
-        verified_clause = "verified_at=NOW()," if mark_verified else ""
-        with self._connect() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    f"""
-                    INSERT INTO browser_state (platform, cookies, user_agent, {'verified_at,' if mark_verified else ''} updated_at, note)
-                    VALUES (%s, %s, %s, {'NOW(),' if mark_verified else ''} NOW(), %s)
-                    ON DUPLICATE KEY UPDATE
-                        cookies=VALUES(cookies),
-                        user_agent=COALESCE(VALUES(user_agent), user_agent),
-                        {verified_clause}
-                        updated_at=NOW(),
-                        note=COALESCE(VALUES(note), note)
-                    """,
-                    (
-                        (platform or "").upper(),
-                        json.dumps(cookies or [], ensure_ascii=False),
-                        user_agent,
-                        note,
-                    ),
-                )
+        now = datetime.now()
+        set_doc: Dict[str, Any] = {"cookies": cookies or [], "updated_at": now}
+        if user_agent is not None:  # COALESCE semantics
+            set_doc["user_agent"] = user_agent
+        if note is not None:
+            set_doc["note"] = note
+        if mark_verified:
+            set_doc["verified_at"] = now
+        self._db.browser_state.update_one(
+            {"_id": (platform or "").upper()}, {"$set": set_doc}, upsert=True
+        )
 
     def clear_browser_state(self, platform: str, *, keep_fingerprint: bool = True) -> bool:
         if not self.enabled:
             return False
-        with self._connect() as conn:
-            with conn.cursor() as cur:
-                if keep_fingerprint:
-                    cur.execute(
-                        "UPDATE browser_state SET cookies=NULL, verified_at=NULL, "
-                        "updated_at=NOW(), note='cookies cleared' WHERE platform=%s",
-                        ((platform or "").upper(),),
-                    )
-                else:
-                    cur.execute(
-                        "DELETE FROM browser_state WHERE platform=%s",
-                        ((platform or "").upper(),),
-                    )
-                return cur.rowcount > 0
+        platform_u = (platform or "").upper()
+        if keep_fingerprint:
+            res = self._db.browser_state.update_one(
+                {"_id": platform_u},
+                {"$set": {"cookies": None, "verified_at": None,
+                          "updated_at": datetime.now(), "note": "cookies cleared"}},
+            )
+            return res.matched_count > 0
+        res = self._db.browser_state.delete_one({"_id": platform_u})
+        return res.deleted_count > 0
 
     def list_browser_states(self) -> List[Dict[str, Any]]:
         if not self.enabled:
             return []
-        with self._connect() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    "SELECT platform, user_agent, verified_at, updated_at, note, "
-                    "CHAR_LENGTH(COALESCE(cookies,'')) AS cookies_len, "
-                    "CHAR_LENGTH(COALESCE(fingerprint,'')) AS fp_len "
-                    "FROM browser_state ORDER BY platform"
-                )
-                rows = [dict(r) for r in cur.fetchall()]
-        for r in rows:
-            r["has_fingerprint"] = bool(r.pop("fp_len", 0))
-            r["has_cookies"] = bool(r.pop("cookies_len", 0))
+        rows = []
+        for r in self._db.browser_state.find({}).sort("_id", 1):
+            rows.append({
+                "platform": r.get("_id"),
+                "user_agent": r.get("user_agent"),
+                "verified_at": r.get("verified_at"),
+                "updated_at": r.get("updated_at"),
+                "note": r.get("note"),
+                "has_fingerprint": bool(r.get("fingerprint")),
+                "has_cookies": bool(r.get("cookies")),
+            })
         return rows
 
     # -- High-level helpers (async-friendly) --------------------------
