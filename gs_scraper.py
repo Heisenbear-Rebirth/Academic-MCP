@@ -172,6 +172,98 @@ class GoogleScholarScraper:
             }],
         }
 
+    @staticmethod
+    def _parse_cited_by(row) -> Optional[int]:
+        """The "Cited by N" link in the result footer (div.gs_fl)."""
+        for a in row.select("div.gs_fl a, div.gs_flb a"):
+            m = re.match(r"\s*Cited by\s+([\d,]+)", a.get_text(" ", strip=True), re.I)
+            if m:
+                return int(m.group(1).replace(",", ""))
+        return None
+
+    @staticmethod
+    def _parse_pdf_link(row) -> tuple:
+        """The free [PDF]/[HTML] full-text link GS shows in div.gs_ggs.
+
+        Returns (url, label) e.g. ("https://arxiv.org/pdf/2108.09084", "PDF").
+        """
+        a = row.select_one("div.gs_ggs a")
+        href = a.get("href", "") if a else ""
+        if not href:
+            return "", ""
+        ctg = a.select_one(".gs_ctg2")
+        label = (ctg.get_text(strip=True) if ctg else "").strip("[] ").upper() or "PDF"
+        return href, label
+
+    @classmethod
+    def _parse_result_row(cls, row, journal: str = None):
+        """Parse one GS result row -> (paper_dict, dedupe_key).
+
+        Shared by the direct-HTTP and browser code paths so they can never
+        drift. Returns (None, None) for non-result rows or ones filtered out
+        by the ``journal`` constraint.
+        """
+        title_elem = row.select_one("h3.gs_rt a") or row.select_one("h3.gs_rt")
+        if not title_elem:
+            return None, None
+        title = title_elem.get_text(strip=True)
+        detail_link = title_elem.get("href", "") if title_elem.name == "a" else ""
+        gs_cluster_id = row.get("data-cid") or ""
+        if not gs_cluster_id:
+            parent = row.find_parent("div", class_="gs_r")
+            if parent is not None:
+                gs_cluster_id = parent.get("data-cid") or ""
+
+        author_pub_elem = row.select_one("div.gs_a")
+        author_pub_str = author_pub_elem.get_text().replace('\xa0', ' ').strip() if author_pub_elem else "N/A"
+        author, date, source, venue_name = "N/A", "N/A", "Google Scholar", ""
+        # Format: "Author1, Author2 - Journal Name, 2023 - PublisherSite"
+        if " - " in author_pub_str:
+            parts = author_pub_str.split(" - ")
+            author = parts[0]
+            if len(parts) > 1:
+                middle = parts[1]
+                date_m = re.search(r'\b(19|20)\d{2}\b', middle)
+                if date_m:
+                    date = date_m.group()
+                venue_name = re.sub(r',?\s*\b(19|20)\d{2}\b.*$', '', middle).strip().rstrip(',').strip()
+                source = parts[-1].strip()
+                if source.startswith("…") or source.startswith("..."):
+                    source_guess = urllib.parse.urlparse(detail_link).netloc
+                    source = source_guess or source
+        else:
+            author = author_pub_str
+
+        from scraper_utils import venue_matches
+        if journal and venue_name and not venue_matches(journal, venue_name):
+            return None, None
+
+        snippet_elem = row.select_one("div.gs_rs")
+        snippet = snippet_elem.get_text().replace('\n', ' ').strip() if snippet_elem else ""
+        pdf_url, pdf_label = cls._parse_pdf_link(row)
+        cited_by = cls._parse_cited_by(row)
+        uid = hashlib.md5((detail_link or gs_cluster_id or title).encode()).hexdigest()[:8]
+
+        from scraper_utils import platform_hint_from_url
+        paper = {
+            "id": uid,
+            "title": title,
+            "author": author,
+            "source": "GS: " + source,
+            "venue_name": venue_name,
+            "date": date,
+            "db_type": "GS Aggregated",
+            "detail_link": detail_link,
+            "recommended_platform": platform_hint_from_url(detail_link),
+            "pdf_url": pdf_url,          # free full-text link, if GS offered one
+            "pdf_label": pdf_label,      # "PDF" / "HTML"
+            "cited_by": cited_by,        # citation count, if present
+            "_abstract": snippet,        # expose the snippet so it's cached + shown
+            "_gs_snippet": snippet,
+            "_gs_cluster_id": gs_cluster_id,
+        }
+        return paper, (detail_link or gs_cluster_id or title)
+
     def _parse_search_html(self, html: str, *, query: str, journal: str = None, limit: int = 10, page_url: str = "") -> Dict:
         soup = bs4.BeautifulSoup(html or "", "html.parser")
         if _gs_is_blocked(soup, html or ""):
@@ -207,70 +299,11 @@ class GoogleScholarScraper:
         for row in rows:
             if len(results) >= limit:
                 break
-
-            title_elem = row.select_one("h3.gs_rt a") or row.select_one("h3.gs_rt")
-            if not title_elem:
-                continue
-
-            title = title_elem.text.strip()
-            detail_link = title_elem.get("href", "") if title_elem.name == "a" else ""
-            gs_cluster_id = row.get("data-cid") or ""
-            if not gs_cluster_id:
-                parent = row.find_parent("div", class_="gs_r")
-                if parent is not None:
-                    gs_cluster_id = parent.get("data-cid") or ""
-
-            dedupe_key = detail_link or gs_cluster_id or title
-            if dedupe_key in seen_links:
+            paper, dedupe_key = self._parse_result_row(row, journal)
+            if paper is None or dedupe_key in seen_links:
                 continue
             seen_links.add(dedupe_key)
-
-            author_pub_elem = row.select_one("div.gs_a")
-            author_pub_str = author_pub_elem.text.replace('\xa0', ' ').strip() if author_pub_elem else "N/A"
-
-            author = "N/A"
-            date = "N/A"
-            source = "Google Scholar"
-            venue_name = ""
-
-            if " - " in author_pub_str:
-                parts = author_pub_str.split(" - ")
-                author = parts[0]
-                if len(parts) > 1:
-                    middle = parts[1]
-                    date_m = re.search(r'\b(19|20)\d{2}\b', middle)
-                    if date_m:
-                        date = date_m.group()
-                    venue_name = re.sub(r',?\s*\b(19|20)\d{2}\b.*$', '', middle).strip().rstrip(',').strip()
-                    source = parts[-1].strip()
-                    if source.startswith("…") or source.startswith("..."):
-                        source_guess = urllib.parse.urlparse(detail_link).netloc
-                        source = source_guess if source_guess else source
-            else:
-                author = author_pub_str
-
-            from scraper_utils import venue_matches
-            if journal and venue_name and not venue_matches(journal, venue_name):
-                continue
-
-            snippet_elem = row.select_one("div.gs_rs")
-            snippet = snippet_elem.text.replace('\n', ' ').strip() if snippet_elem else ""
-            uid = hashlib.md5((detail_link or gs_cluster_id or title).encode()).hexdigest()[:8]
-
-            from scraper_utils import platform_hint_from_url
-            results.append({
-                "id": uid,
-                "title": title,
-                "author": author,
-                "source": "GS: " + source,
-                "venue_name": venue_name,
-                "date": date,
-                "db_type": "GS Aggregated",
-                "detail_link": detail_link,
-                "recommended_platform": platform_hint_from_url(detail_link),
-                "_gs_snippet": snippet,
-                "_gs_cluster_id": gs_cluster_id,
-            })
+            results.append(paper)
 
         return {
             "total_results": total_results,
@@ -441,106 +474,126 @@ class GoogleScholarScraper:
 
         collected = 0
         seen_links = set()
-        
+
         for row in rows:
             if collected >= limit:
                 break
-                
-            title_elem = row.select_one("h3.gs_rt a") or row.select_one("h3.gs_rt")
-            if not title_elem:
+            paper, dedupe_key = self._parse_result_row(row, journal)
+            if paper is None or dedupe_key in seen_links:
                 continue
-                
-            title = title_elem.text.strip()
-            detail_link = title_elem.get("href", "") if title_elem.name == "a" else ""
-            
-            if detail_link in seen_links and detail_link:
-                continue
-            seen_links.add(detail_link)
-            
-            author_pub_elem = row.select_one("div.gs_a")
-            author_pub_str = author_pub_elem.text.replace('\xa0', ' ').strip() if author_pub_elem else "N/A"
-            
-            # Author pub string format: "Author1, Author2 - Journal Name, 2023 - PublisherSite"
-            author = "N/A"
-            date = "N/A"
-            source = "Google Scholar"
-            venue_name = ""
-
-            if " - " in author_pub_str:
-                parts = author_pub_str.split(" - ")
-                author = parts[0]
-                if len(parts) > 1:
-                    middle = parts[1]
-                    date_m = re.search(r'\b(19|20)\d{2}\b', middle)
-                    if date_m:
-                        date = date_m.group()
-                    # Strip the year and trailing comma to leave just the venue/journal token.
-                    venue_name = re.sub(r',?\s*\b(19|20)\d{2}\b.*$', '', middle).strip().rstrip(',').strip()
-                    source = parts[-1].strip()
-                    if source.startswith("…"):
-                        source_guess = urllib.parse.urlparse(detail_link).netloc
-                        source = source_guess if source_guess else source
-            else:
-                author = author_pub_str
-
-            # Belt and suspenders on top of GS's &as_publication=, which is fuzzy.
-            # GS routinely truncates venue names ("Advances in neural ...") -- use
-            # the shared matcher so the trailing ellipsis is forgiven.
-            from scraper_utils import venue_matches
-            if journal and venue_name and not venue_matches(journal, venue_name):
-                continue
-
-            snippet_elem = row.select_one("div.gs_rs")
-            snippet = snippet_elem.text.replace('\n', ' ').strip() if snippet_elem else ""
-
-            uid = hashlib.md5(detail_link.encode()).hexdigest()[:8]
-
-            # data-cid lives on <div class="gs_r gs_or gs_scl" data-cid="..."/>.
-            # Our `rows` selector matched both gs_r (outer) and gs_ri (inner);
-            # for gs_ri we walk up to the gs_r parent. This cluster_id is what
-            # gs_scraper.fetch_ris() later uses to build the GS cite URL.
-            gs_cluster_id = row.get("data-cid") or ""
-            if not gs_cluster_id:
-                parent = row.find_parent("div", class_="gs_r")
-                if parent is not None:
-                    gs_cluster_id = parent.get("data-cid") or ""
-
-            from scraper_utils import platform_hint_from_url
-            results.append({
-                "id": uid,
-                "title": title,
-                "author": author,
-                "source": "GS: " + source,
-                "venue_name": venue_name,
-                "date": date,
-                "db_type": "GS Aggregated",
-                "detail_link": detail_link,
-                "recommended_platform": platform_hint_from_url(detail_link),
-                "_gs_snippet": snippet,
-                "_gs_cluster_id": gs_cluster_id,
-            })
+            seen_links.add(dedupe_key)
+            results.append(paper)
             collected += 1
-            
+
         return {
             "total_results": total_results,
             "papers": results
         }
 
+    def _gs_native_id(self, detail_url: str) -> str:
+        return hashlib.sha1((detail_url or "").encode("utf-8")).hexdigest()[:24]
+
+    def _gs_cached_extra(self, detail_url: str) -> dict:
+        """Stored `extra` (gs_cluster_id / gs_pdf_url) for a GS paper, or {}.
+
+        Requires the library to be enabled and the paper to have been captured
+        by a prior search_papers call.
+        """
+        if not detail_url or detail_url == "N/A":
+            return {}
+        from library import get_library
+        lib = get_library()
+        if not lib.enabled:
+            return {}
+        row = lib.get_paper("GS", self._gs_native_id(detail_url))
+        if not row:
+            return {}
+        extra = row.get("extra")
+        if isinstance(extra, (bytes, bytearray)):
+            extra = extra.decode("utf-8", errors="replace")
+        if isinstance(extra, str):
+            try:
+                extra = json.loads(extra)
+            except Exception:
+                extra = {}
+        return extra if isinstance(extra, dict) else {}
+
     async def get_paper_details(self, detail_url: str) -> Dict[str, str]:
-        # Google scholar direct links point to the publisher.
-        # We just return advising the LLM to use the specific platform link directly.
+        # GS is a router to the publisher and has no GS-hosted abstract page.
+        # Surface the snippet captured at search time (cached as `abstract`)
+        # plus any free PDF link; otherwise point at the native platform.
+        abstract, pdf_url = "", ""
+        from library import get_library
+        lib = get_library()
+        if lib.enabled and detail_url and detail_url != "N/A":
+            row = lib.get_paper("GS", self._gs_native_id(detail_url))
+            if row:
+                abstract = (row.get("abstract") or "").strip()
+                extra = row.get("extra")
+                if isinstance(extra, (bytes, bytearray)):
+                    extra = extra.decode("utf-8", errors="replace")
+                if isinstance(extra, str):
+                    try:
+                        extra = json.loads(extra)
+                    except Exception:
+                        extra = {}
+                if isinstance(extra, dict):
+                    pdf_url = extra.get("gs_pdf_url") or ""
         return {
             "url": detail_url,
-            "abstract": "Google Scholar acts as a router. Please inspect the source URL. If it's an IEEE/ACM/SD/CNKI link, use their native MCP scraper or directly download using 'read_paper_content' with the specific platform.",
-            "keywords": ["GoogleScholar", "Redirected"],
-            "doi": "Fetch via Native Tool."
+            "abstract": abstract or "Google Scholar is a router (no abstract page). Run search_papers first to capture the snippet, or open the source / PDF link.",
+            "keywords": ["GoogleScholar"],
+            "doi": "",
+            "pdf_url": pdf_url,
+            "note": "GS aggregates results. If pdf_url is present it is a free full text; otherwise use the native platform scraper on the source URL.",
         }
 
     async def download_paper(self, detail_url: str, output_dir: str) -> str:
-        return "Not supported via GS. Please use native read_paper_content with target platform (e.g., IEEE, SD) on this URL."
+        """Download GS's free [PDF] full-text link (arXiv / proceedings / OA
+        journals) when a prior search captured one; else point at the native
+        platform. Returns the saved file path or an explanatory message."""
+        pdf_url = self._gs_cached_extra(detail_url).get("gs_pdf_url") or ""
+        if not pdf_url:
+            return ("No free PDF link was captured for this GS result "
+                    "(run search_papers first; note not every result has one). "
+                    "Use read_paper_content with the native platform (IEEE, SD, ...) on the source URL.")
+        os.makedirs(output_dir, exist_ok=True)
+        timeout = aiohttp.ClientTimeout(total=90, connect=15, sock_read=60)
+        headers = {**self._default_headers(), "Accept": "application/pdf,*/*"}
+        try:
+            async with aiohttp.ClientSession(timeout=timeout, cookie_jar=aiohttp.DummyCookieJar()) as session:
+                async with session.get(pdf_url, headers=headers, ssl=False, allow_redirects=True) as resp:
+                    if resp.status != 200:
+                        return f"GS free-PDF fetch returned HTTP {resp.status}: {pdf_url}"
+                    data = await resp.read()
+        except Exception as e:
+            return f"GS free-PDF download failed ({e}): {pdf_url}"
+        if not data[:5].startswith(b"%PDF"):
+            return f"The GS free link was not a direct PDF (likely an HTML landing page): {pdf_url}"
+        path = os.path.join(output_dir, f"gs_{self._gs_native_id(detail_url)}.pdf")
+        try:
+            with open(path, "wb") as f:
+                f.write(data)
+        except Exception as e:
+            return f"GS PDF save failed: {e}"
+        return path
 
     async def read_paper_content(self, detail_url: str, output_dir: str) -> str:
-        return "Not supported via GS. Please use native read_paper_content with target platform (e.g., IEEE, SD) on this URL."
+        pdf_path = await self.download_paper(detail_url, output_dir)
+        if not (isinstance(pdf_path, str) and os.path.exists(pdf_path)):
+            return pdf_path  # explanatory message from download_paper
+        try:
+            import pymupdf4llm
+            images_dir = os.path.join(output_dir, "images")
+            os.makedirs(images_dir, exist_ok=True)
+            md_text = pymupdf4llm.to_markdown(doc=pdf_path, write_images=True, image_path=images_dir)
+            md_path = os.path.splitext(pdf_path)[0] + ".md"
+            with open(md_path, "w", encoding="utf-8") as f:
+                f.write(md_text)
+            preview = (md_text or "")[:1000]
+            return f"Markdown generation complete. Saved to: {md_path}\n\nPreview:\n{preview}..."
+        except Exception as e:
+            return f"Downloaded GS PDF to {pdf_path} but markdown conversion failed: {e}"
 
     async def fetch_ris(self, detail_url: str) -> str:
         """GS native RIS via the per-cluster cite popup.
