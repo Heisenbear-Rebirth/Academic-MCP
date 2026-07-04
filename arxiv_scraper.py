@@ -9,6 +9,7 @@ import bs4
 import pymupdf4llm
 import hashlib
 from mcp_logging import safe_stderr_print
+from scraper_utils import remember_downloaded_pdf, reuse_downloaded_pdf
 
 print = safe_stderr_print
 
@@ -22,15 +23,25 @@ ARXIV_FRONTEND_HEADERS = {
 }
 
 
-def _fetch_text(url: str, *, referer: str = "https://arxiv.org/") -> str:
+def _fetch_text_once(url: str, *, referer: str = "https://arxiv.org/", timeout: int = 20) -> str:
     headers = dict(ARXIV_FRONTEND_HEADERS)
     if referer:
         headers["Referer"] = referer
     req = urllib.request.Request(url, headers=headers)
-    with urllib.request.urlopen(req, timeout=30) as response:
+    with urllib.request.urlopen(req, timeout=timeout) as response:
         raw = response.read()
         charset = response.headers.get_content_charset() or "utf-8"
         return raw.decode(charset, errors="replace")
+
+
+def _fetch_text(url: str, *, referer: str = "https://arxiv.org/") -> str:
+    last_error = None
+    for timeout in (15, 30):
+        try:
+            return _fetch_text_once(url, referer=referer, timeout=timeout)
+        except Exception as e:
+            last_error = e
+    raise last_error
 
 
 def _year_allowed(year: int | None, start_year: int = None, end_year: int = None) -> bool:
@@ -53,6 +64,7 @@ class ArxivScraper:
         self.context = None
         self.page = None
         self.camoufox_cm = None
+        self._pdf_cache = {}
         
     async def initialize(self, force_headful=False):
         if not self.context:
@@ -248,6 +260,10 @@ class ArxivScraper:
         # arXiv IDs can have a version suffix like v1. Sometimes filenames with . break things smoothly, we replace with _
         safe_id = arxiv_id.replace('.', '_')
         file_path = os.path.join(output_dir, f"arxiv_{safe_id}.pdf")
+        cached = reuse_downloaded_pdf(self._pdf_cache, arxiv_id, output_dir, os.path.basename(file_path))
+        if cached:
+            print(f"[ARXIV] Reused in-process PDF cache for {arxiv_id}.")
+            return cached
         
         def download():
             req = urllib.request.Request(pdf_url, headers={'User-Agent': 'Mozilla/5.0'})
@@ -256,6 +272,7 @@ class ArxivScraper:
                 
         try:
             await asyncio.to_thread(download)
+            remember_downloaded_pdf(self._pdf_cache, arxiv_id, file_path)
             return file_path
         except Exception as e:
             return f"Error downloading arXiv PDF: {str(e)}"

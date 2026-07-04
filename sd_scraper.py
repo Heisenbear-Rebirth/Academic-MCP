@@ -12,7 +12,8 @@ import urllib.parse
 import re
 import aiohttp
 from mcp_logging import safe_stderr_print
-from runtime_config import allow_headful_fallback_for, ensure_runtime_environment, manual_verification_timeout_seconds, project_path
+from runtime_config import allow_headful_fallback_for, ensure_runtime_environment, manual_verification_timeout_seconds, profile_path
+from scraper_utils import remember_downloaded_pdf, reuse_downloaded_pdf
 
 print = safe_stderr_print
 ensure_runtime_environment()
@@ -25,6 +26,7 @@ class ScienceDirectScraper:
         self.camoufox_cm = None
         self.allow_headful_fallback = allow_headful_fallback_for("SD")
         self.manual_verification_timeout = manual_verification_timeout_seconds()
+        self._pdf_cache = {}
 
     def _force_pdf_download_handler(self, profile_dir: str) -> None:
         """Make Firefox save PDFs instead of opening the internal viewer.
@@ -275,19 +277,89 @@ class ScienceDirectScraper:
         return headers
 
     async def _cookie_header_for_url(self, url: str) -> str:
-        if not self.context:
-            return ""
+        pairs = []
         try:
-            cookies = await self.context.cookies(url)
+            cookies = await self.context.cookies(url) if self.context else []
         except Exception:
             cookies = []
-        pairs = []
         for cookie in cookies:
             name = cookie.get("name")
             value = cookie.get("value")
             if name and value is not None:
                 pairs.append(f"{name}={value}")
+        if not pairs:
+            pairs = [f"{name}={value}" for name, value in self._profile_cookie_dict_for_url(url).items()]
         return "; ".join(pairs)
+
+    def _profile_cookie_dict_for_url(self, url: str) -> dict:
+        """Read ScienceDirect cookies from the project-local Firefox profile.
+
+        This lets request-first paths carry verification cookies before we pay
+        the cost of launching Camoufox. The database is opened read-only and
+        immutable, so this does not mutate the browser profile.
+        """
+        try:
+            import sqlite3
+            import time
+            from pathlib import Path
+
+            parsed = urllib.parse.urlparse(url)
+            req_host = (parsed.hostname or "").lower()
+            if not req_host:
+                return {}
+            db_path = Path(profile_path(".sd_profile")) / "cookies.sqlite"
+            if not db_path.exists():
+                return {}
+            uri = db_path.resolve().as_uri() + "?mode=ro&immutable=1"
+            now = int(time.time())
+            out = {}
+            con = sqlite3.connect(uri, uri=True)
+            try:
+                rows = con.execute(
+                    """
+                    SELECT host, name, value, path, expiry, isSecure
+                    FROM moz_cookies
+                    WHERE (expiry = 0 OR expiry > ?)
+                    """,
+                    (now,),
+                ).fetchall()
+            finally:
+                con.close()
+            scheme = (parsed.scheme or "https").lower()
+            path = parsed.path or "/"
+            for host, name, value, cookie_path, _expiry, is_secure in rows:
+                if not name or value is None:
+                    continue
+                cookie_host = str(host or "").lstrip(".").lower()
+                if not cookie_host:
+                    continue
+                if req_host != cookie_host and not req_host.endswith("." + cookie_host):
+                    continue
+                if is_secure and scheme != "https":
+                    continue
+                cookie_path = cookie_path or "/"
+                if not path.startswith(cookie_path):
+                    continue
+                out[str(name)] = str(value)
+            return out
+        except Exception as e:
+            print(f"[SD] Could not read profile cookies for direct request: {e}")
+            return {}
+
+    async def _cookie_dict_for_url(self, url: str = "") -> dict:
+        cookie_dict = {}
+        try:
+            cookies = await self.context.cookies(url) if self.context else []
+        except Exception:
+            cookies = []
+        for cookie in cookies:
+            name = cookie.get("name")
+            value = cookie.get("value")
+            if name and value is not None:
+                cookie_dict[name] = value
+        if not cookie_dict:
+            cookie_dict.update(self._profile_cookie_dict_for_url(url))
+        return cookie_dict
 
     async def _direct_get_bytes(self, url: str, *, referer: str = None, accept: str = "*/*") -> bytes:
         headers = self._default_headers(referer=referer, accept=accept)
@@ -336,15 +408,7 @@ class ScienceDirectScraper:
                 ua = await self.page.evaluate("navigator.userAgent")
             except Exception:
                 ua = ""
-        try:
-            cookies = await self.context.cookies(url) if self.context else []
-        except Exception:
-            cookies = []
-        cookie_dict = {
-            c.get("name"): c.get("value")
-            for c in cookies
-            if c.get("name") and c.get("value") is not None
-        }
+        cookie_dict = await self._cookie_dict_for_url(url)
         headers = self._default_headers(referer=referer, accept=accept)
         if ua:
             headers["User-Agent"] = ua
@@ -770,15 +834,7 @@ class ScienceDirectScraper:
             or request_headers.get("Referer")
             or "https://www.sciencedirect.com/"
         )
-        try:
-            cookies = await self.context.cookies()
-        except Exception:
-            cookies = []
-        cookie_dict = {
-            c.get("name"): c.get("value")
-            for c in cookies
-            if c.get("name") and c.get("value")
-        }
+        cookie_dict = await self._cookie_dict_for_url(url)
         headers = {
             "Accept": "application/pdf,*/*",
             "Referer": referer,
@@ -1112,8 +1168,18 @@ class ScienceDirectScraper:
 
     async def download_paper(self, detail_url: str, output_dir: str) -> str:
         os.makedirs(output_dir, exist_ok=True)
+        pii_match = re.search(r"/pii/([A-Za-z0-9]+)", detail_url or "")
+        pii = pii_match.group(1) if pii_match else ""
+        if pii:
+            cached = reuse_downloaded_pdf(self._pdf_cache, pii, output_dir, f"sd_{pii}.pdf")
+            if cached:
+                print(f"[SD] Reused in-process PDF cache for {pii}.")
+                return cached
+
         fast_path = await self._download_paper_fast_path(detail_url, output_dir)
         if fast_path:
+            if pii:
+                remember_downloaded_pdf(self._pdf_cache, pii, fast_path)
             return fast_path
 
         await self._ensure_browser()
@@ -1273,6 +1339,8 @@ class ScienceDirectScraper:
             # On failure, surface the log path so we can analyze.
             if isinstance(result, str) and result.startswith("Error: SD PDF download failed"):
                 return result + f"\nSniffer log: {_sniff_log_path}"
+            if pii and isinstance(result, str):
+                remember_downloaded_pdf(self._pdf_cache, pii, result)
             return result
         finally:
             try:

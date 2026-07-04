@@ -89,6 +89,30 @@ def _sd_native_id(url: str) -> str:
     return match.group(1) if match else ""
 
 
+def _aiaa_native_id(url: str) -> str:
+    decoded = urllib.parse.unquote(url or "")
+    match = re.search(r"(?:/doi/(?:abs/|full/|pdf/|epdf/|reader/)?)?(10\.2514/[^/?#\s\"'<>]+)", decoded, re.IGNORECASE)
+    return match.group(1).rstrip(".") if match else ""
+
+
+def _mdpi_native_id(url: str) -> str:
+    decoded = urllib.parse.unquote(url or "")
+    doi = re.search(r"(10\.3390/[A-Za-z0-9._;()/:-]+)", decoded, re.IGNORECASE)
+    if doi:
+        return doi.group(1).rstrip(").,;")
+    parsed = urllib.parse.urlparse(decoded)
+    path = (parsed.path or "").strip("/")
+    path = re.sub(r"/(?:pdf|htm|xml)(?:/)?$", "", path)
+    match = re.match(r"([0-9]{4}-[0-9]{3,4}X?/\d+/\d+/[^/?#]+)", path, re.IGNORECASE)
+    return match.group(1) if match else ""
+
+
+def _wos_native_id(url: str) -> str:
+    decoded = urllib.parse.unquote(url or "")
+    match = re.search(r"(WOS:[A-Za-z0-9]+)", decoded, re.IGNORECASE)
+    return match.group(1).upper() if match else ""
+
+
 def _gs_native_id(url: str) -> str:
     # Google Scholar links are external. Fall back to URL hash.
     if not url or url == "N/A":
@@ -112,6 +136,9 @@ _EXTRACTORS = {
     "ARXIV": _arxiv_native_id,
     "ACM": _acm_native_id,
     "SD": _sd_native_id,
+    "AIAA": _aiaa_native_id,
+    "MDPI": _mdpi_native_id,
+    "WOS": _wos_native_id,
     "GS": _gs_native_id,
     "PATYEE": _patyee_native_id,
     "DAWEI": _dawei_native_id,

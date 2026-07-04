@@ -3,7 +3,7 @@
 > 中文版：[README.zh-CN.md](README.zh-CN.md)
 
 A Model Context Protocol (MCP) server that exposes a uniform paper-discovery
-and full-text-extraction API on top of eight academic / patent sources:
+and full-text-extraction API on top of eleven academic / patent sources:
 
 | Code      | Source                                       | Engine             |
 | --------- | -------------------------------------------- | ------------------ |
@@ -12,6 +12,9 @@ and full-text-extraction API on top of eight academic / patent sources:
 | `IEEE`    | IEEE Xplore                                  | Camoufox (Firefox) |
 | `ACM`     | ACM Digital Library                          | Camoufox (Firefox) |
 | `SD`      | ScienceDirect (Elsevier)                     | Camoufox (Firefox) |
+| `AIAA`    | AIAA Aerospace Research Central              | request-first HTTP + Camoufox auth |
+| `MDPI`    | MDPI journals                                | request-first HTTP |
+| `WOS`     | Web of Science Core Collection               | API-level WoS fetch + Chromium auth |
 | `GS`      | Google Scholar                               | Camoufox (Firefox) |
 | `PATYEE`  | Patyee 专利之星                                  | Playwright Chromium |
 | `DAWEI`   | 大为专利 (pat.daweisoft.com)                     | Playwright Chromium |
@@ -39,7 +42,7 @@ useful as a CLI/library on their own.
 ┌──────────────────────────────────────────────────────────────────────┐
 │  server.py  —  FastMCP entry, dispatches to per-platform scrapers    │
 │  ┌──────────────────────────┐    ┌────────────────────────────────┐  │
-│  │  Library (library.py)    │◄──►│  Scrapers (8 modules)          │  │
+│  │  Library (library.py)    │◄──►│  Scrapers (11 modules)         │  │
 │  │  MySQL: papers,          │    │  - one Camoufox/Chromium       │  │
 │  │         search_queries,  │    │    persistent context per      │  │
 │  │         browser_state    │    │    platform (singleton)        │  │
@@ -138,7 +141,7 @@ browser state — but everything still works).
 | `override_playwright_browsers_path`   | bool    | `true`           | Force-export the path so the right Chromium is picked up by Playwright on every launch. |
 | `set_cwd_to_project_root`             | bool    | `true`           | `chdir` to the project root on import — keeps relative paths sane in MCP servers.       |
 | `allow_headful_fallback`              | bool    | `false`          | Master switch: on anti-bot block, may we relaunch with a visible browser for human verification? |
-| `allow_headful_fallback_platforms`    | list    | `["ACM","SD"]`   | Subset of platforms allowed to do the headful CAPTCHA fallback.                         |
+| `allow_headful_fallback_platforms`    | list    | `["ACM","SD","AIAA","WOS"]` | Subset of platforms allowed to do the headful CAPTCHA fallback.                         |
 | `manual_verification_timeout_seconds` | int     | `180`            | How long we wait (in headful mode) for a human to click through the CAPTCHA.            |
 | `library_enabled`                     | bool    | `true`           | Master switch for the MySQL+filesystem Library. Set to `false` to disable caching.      |
 | `library_root`                        | string  | `".repo"`        | Where canonical PDFs/MD/images live (relative to project root or absolute).             |
@@ -159,7 +162,7 @@ appear to the LLM with the docstrings preserved verbatim.
 | Parameter      | Type          | Description                                                                                                 |
 | -------------- | ------------- | ----------------------------------------------------------------------------------------------------------- |
 | `query`        | str           | The search terms. Free text; per-platform syntax (e.g. IEEE supports `("Publication Title":"...")`) is allowed. |
-| `platform`     | str           | One of `CNKI`, `IEEE`, `ARXIV`, `ACM`, `SD`, `GS`, `PATYEE`, `DAWEI`.                                       |
+| `platform`     | str           | One of `CNKI`, `IEEE`, `ARXIV`, `ACM`, `SD`, `AIAA`, `MDPI`, `WOS`, `GS`, `PATYEE`, `DAWEI`.                         |
 | `search_field` | str           | Restricts the query field. Platform-specific (see docstring); defaults to each platform's "all".            |
 | `db_scope`     | str           | CNKI only: `总库 / 中文 / 外文`.                                                                                  |
 | `source_type`  | str           | Document type filter (research-article, conference, journal, …). Platform-specific.                         |
@@ -244,6 +247,26 @@ Platform-specific behavior:
   enough to trigger the signed ScienceDirect asset stream, then saves bytes
   through programmatic download/body capture. A solved PDF-host challenge
   can be reused by later requests until the publisher invalidates the token.
+- `AIAA`: search, details, PDF, and RIS are request-first against Atypon
+  endpoints (`/action/doSearch`, `/doi/...`, `/doi/pdf/...`,
+  `/action/downloadCitation`). The browser is only used to refresh the
+  Cloudflare verification state; direct requests reuse that state with the
+  Firefox 135 network fingerprint required by the issued `cf_clearance`.
+- `MDPI`: search/details/PDF/RIS are request-first. The scraper handles
+  MDPI's Akamai interstitial in-process by parsing the `bm-verify` payload
+  and posting to `/_sec/verify?provider=interstitial`, then reuses the
+  resulting session cookie for HTML, `/pdf`, and `/export` requests.
+- `WOS`: discovery-only. Search calls the captured
+  `/api/wosnx/core/runQuerySearch` NDJSON endpoint and parses records,
+  abstracts, citation counts, DOI, source, and document type metadata.
+  `search_field="ADVANCED"` enables native Web of Science query syntax, for
+  example `TS=("aeroelastic flutter") AND PY=(2020-2026)`; normal fielded
+  search still supports `TS`, `TI`, `AU`, `DO`, `AB`, and `UT`. In the tested
+  Tongji VPN route, plain Python/curl HTTP stacks fail during TLS while
+  Chromium succeeds, so the scraper uses a verified Chromium profile to issue
+  API-level `fetch()` requests without clicking through the UI. PDF download
+  and full-text reading are intentionally unsupported; use DOI/publisher links
+  from the result with the native publisher scraper.
 
 ### `read_paper_content(url, output_dir, platform="CNKI")`
 
@@ -329,7 +352,9 @@ on a cached row doesn't refetch.
 | IEEE     | platform       | `/rest/search/citation/format`, with `/xpl/downloadCitations` form POST fallback.                                          |
 | ACM      | platform       | `/action/downloadCitation?format=ris&include=abs`.                                                                         |
 | SD       | platform       | `/sdfe/arp/cite?format=application/x-research-info-systems` — issued via `page.evaluate("fetch(url)")` so DataDome sees an in-app XHR (a direct `context.request.get` returns a 403 challenge page). |
-| ARXIV / CNKI / GS / PATYEE / DAWEI | synthesized | `ris_utils.synthesize_ris` infers `TY` from db_type + venue, splits `AU`, parses `PY/DA` from `pub_date`, and tags `AN  - {platform}:{native_id}` for round-tripping. |
+| AIAA     | platform       | `/action/downloadCitation` form POST with `format=ris&include=abs`.                                                        |
+| MDPI     | platform       | `/export` form POST with `articles_ids[]` and `export_format_top=ris`.                                                     |
+| ARXIV / CNKI / WOS / GS / PATYEE / DAWEI | synthesized | `ris_utils.synthesize_ris` infers `TY` from db_type + venue, splits `AU`, parses `PY/DA` from `pub_date`, and tags `AN  - {platform}:{native_id}` for round-tripping. |
 
 A bundled export is available from the web console: filter `/papers` by
 state, tick the checkboxes, and POST to `/papers/export-ris`.
@@ -463,12 +488,17 @@ PowerShell equivalents (`library_web_start.ps1` /
 
 ## Validation and performance
 
-Latest integration smoke run: `scratch/full_platform_test.py`, run id
-`20260614_full_final` (2026-06-14). Each downloadable platform was tested
-with up to three fresh sample downloads. The run completed with **0 hard
-failures**. `unavailable` means the publisher or the tool semantics did
-not expose a downloadable PDF for that sample; it is not counted as a
-transport or parser failure.
+Latest full-platform integration smoke run: `scratch/full_platform_test.py`,
+run id `20260614_full_final` (2026-06-14). AIAA was added and tested
+separately with run id `20260628_aiaa_final_relevance` (2026-06-28);
+MDPI was added and tested with run id `20260628_mdpi_retry` (2026-06-28). Each
+downloadable platform was tested with up to three fresh sample downloads.
+WOS was added as a discovery-only platform and smoke-tested with run id
+`20260704_wos_advanced` (2026-07-04), covering native advanced-search payloads
+through `search_field="ADVANCED"`.
+These runs completed with **0 hard failures**. `unavailable` means the
+publisher or the tool semantics did not expose a downloadable PDF for that
+sample; it is not counted as a transport or parser failure.
 
 | Platform | Search | Details | Download classification | Read |
 | -------- | -----: | ------: | ----------------------- | ---: |
@@ -477,17 +507,35 @@ transport or parser failure.
 | `IEEE`   | 4.165 s | 1.149 s | 3/3 OK: 29.498, 8.352, 2.809 s | success, 36.236 s |
 | `ACM`    | 25.385 s | 3.034 s | 3/3 unavailable: sampled articles exposed no PDF link | unavailable |
 | `SD`     | 15.312 s | 4.913 s | 3/3 OK: 4.835, 5.381, 3.819 s | success, 22.149 s |
+| `AIAA`   | 1.879 s | 0.828 s | 3/3 OK: 8.993, 5.554, 3.004 s | success, 14.402 s |
+| `MDPI`   | 2.388 s | 0.976 s | 3/3 OK: 4.977, 11.925, 19.477 s | success, 7.186 s |
+| `WOS`    | 9.295 s | 0.000 s | not applicable by design | not applicable |
 | `GS`     | 2.443 s | 0.000 s | not applicable by design | not applicable |
 | `PATYEE` | 1.695 s | 0.374 s | 1/3 OK, 2/3 unavailable | success, 8.778 s |
 | `DAWEI`  | 2.551 s | 0.755 s | 3/3 OK: 3.115, 3.284, 2.598 s | success, 4.768 s |
 
 Operational notes:
 
-- ACM and SD require valid verification state for some requests. Once the
+- ACM, SD, and AIAA require valid verification state for some requests. Once the
   visible challenge has been solved, subsequent retrievals reuse the stored
   browser identity and cookies where the publisher accepts them.
 - SD PDF success depends on the separate `pdf.sciencedirectassets.com`
   challenge as well as the ScienceDirect detail-page DataDome state.
+- AIAA accepts direct programmatic requests only when the request fingerprint
+  matches the Firefox profile that produced `cf_clearance`; the implemented
+  path uses `curl_cffi` with `firefox135`.
+- AIAA's latest-date book-chapter samples may return publisher purchase
+  pages from `/doi/pdf/...`; these are classified as `unavailable`, not
+  transport failures (`20260628_aiaa_date_sort_classified` had 0 hard
+  failures).
+- MDPI is open-access and uses a lightweight Akamai interstitial; the
+  challenge is solved programmatically and does not require a browser
+  warmup profile.
+- WOS may require hCaptcha/passive verification. Run
+  `warmup_platform_auth(platforms="WOS")` once when it returns
+  `Server.passiveVerificationRequired`; after that, searches use the WoS
+  NDJSON endpoint through the verified Chromium profile. WoS is not a PDF
+  source in this MCP.
 - Google Scholar is search-oriented in this server; PDF download/read is
   intentionally reported as not applicable unless a downstream source is
   added for a specific result.
@@ -502,6 +550,10 @@ Operational notes:
 | `TargetClosedError: Target page, context or browser has been closed` | Cloudflare timeout left the persistent context wedged.                | Auto-handled: `_context_is_alive` detects and rebuilds on next call. If repeated, restart the MCP server.          |
 | `ProfileInUseError: ... already in use by another MCP server`        | A second client tried to claim a profile already held by a *live* PID. | Either close the other client or set `MCP_PROFILE_SUFFIX` to a different value in this client's env.               |
 | SD PDF page is visible but no file is saved                           | Firefox opened the PDF internally instead of emitting a download.     | Auto-handled: the SD profile forces `application/pdf` to save-to-disk and the scraper captures the download event. |
+| AIAA direct requests return `Just a moment...` / 403                  | The Cloudflare cookie is missing, stale, or tied to a different browser fingerprint. | Run `warmup_platform_auth(platforms="AIAA")`; the scraper then reuses the verified state via direct `firefox135` HTTP requests. |
+| MDPI returns a short Akamai interstitial page                          | The session has not completed MDPI's `bm-verify` check yet.           | Auto-handled: the scraper posts the parsed challenge to `/_sec/verify?provider=interstitial` and retries the original request. |
+| WOS returns `Server.passiveVerificationRequired`                       | WoS requires hCaptcha/passive verification for the current institution/IP session. | Run `warmup_platform_auth(platforms="WOS")`, complete verification in Chromium, then retry the search. |
+| WOS direct Python/curl HTTP fails during TLS                           | This Tongji VPN/Clash route accepts Chromium networking but drops generic TLS clients before HTTP. | Expected for WOS; the scraper sends API-level `fetch()` requests from the verified Chromium profile instead of UI-click scraping. |
 | ACM download returns unavailable                                      | The article page and `/doi/pdf/...` endpoint redirect to abstract HTML with no PDF link. | Treated as publisher-unavailable, not a scraper failure. Try a different ACM article/DOI.                         |
 | `_cache_hit=true` but the result looks stale                         | Permanent search cache returned a fossil row.                         | `/searches` → delete the row, re-run the search.                                                                   |
 | `journal=` filter returned 0 results on CNKI                         | CNKI relevance ordering may not surface the target journal in page 1. | Increase `limit`, narrow the query, or accept that CNKI's cross-journal coverage is sparse for general queries.    |
@@ -525,6 +577,9 @@ Operational notes:
     - `IEEE`:  `9266228` (the `arnumber` from `/document/<n>/`)
     - `ACM`:   `10.1145/3597503.3608128` (the DOI, parsed straight from `/doi/...`)
     - `SD`:    `S0263224125035523` (the PII)
+    - `AIAA`:  `10.2514/6.2022-2883` (the DOI, parsed from `/doi/...`)
+    - `MDPI`:  `2072-666X/17/7/785` (the article path; DOI is stored as metadata)
+    - `WOS`:   `WOS:001064481000002` (the Web of Science accession number)
     - `CNKI`:  `DBCODE|FileName`
     - `GS`:    SHA1 of the result URL (external link → hashed)
     - `PATYEE`: the `pn=` value

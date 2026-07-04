@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import os
 import re
+import shutil
 from typing import Any, Iterable, Optional
 
 from urllib.parse import urlparse
@@ -31,6 +32,9 @@ _PLATFORM_DOMAIN_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("IEEE",   re.compile(r"(?:^|\.)ieee(?:xplore)?\.ieee\.org$|(?:^|\.)ieeexplore\.ieee\.org$", re.IGNORECASE)),
     ("ACM",    re.compile(r"(?:^|\.)acm\.org$", re.IGNORECASE)),
     ("SD",     re.compile(r"(?:^|\.)sciencedirect\.com$|(?:^|\.)sciencedirectassets\.com$|(?:^|\.)linkinghub\.elsevier\.com$", re.IGNORECASE)),
+    ("AIAA",   re.compile(r"(?:^|\.)arc\.aiaa\.org$|(?:^|\.)aiaa\.org$", re.IGNORECASE)),
+    ("MDPI",   re.compile(r"(?:^|\.)mdpi\.com$|(?:^|\.)mdpi-res\.com$", re.IGNORECASE)),
+    ("WOS",    re.compile(r"(?:^|\.)webofscience\.com$|(?:^|\.)webofscience\.clarivate\.cn$|(?:^|\.)webofknowledge\.com$", re.IGNORECASE)),
     ("CNKI",   re.compile(r"(?:^|\.)cnki\.(?:com\.cn|net)$", re.IGNORECASE)),
     ("PATYEE", re.compile(r"(?:^|\.)patyee\.com$", re.IGNORECASE)),
     ("DAWEI",  re.compile(r"(?:^|\.)daweisoft\.com$", re.IGNORECASE)),
@@ -334,6 +338,56 @@ async def capture_browser_cookies(context, platform: str, note: str = None) -> N
         _print(f"[cookies] {platform}: stored {len(cookies)} cookies (verified={has_clearance})")
     except Exception as e:
         _print(f"[cookies] {platform} capture failed: {e}")
+
+
+# ---------------------------------------------------------------------------
+# In-process PDF reuse
+# ---------------------------------------------------------------------------
+# The Library handles persistent cross-call caching at the MCP server layer.
+# These helpers cover direct scraper use and test runners that call
+# download_paper() and then read_paper_content() on the same scraper instance.
+
+def _valid_pdf_path(path: str | os.PathLike | None) -> bool:
+    if not path:
+        return False
+    try:
+        with open(path, "rb") as fh:
+            return fh.read(4) == b"%PDF"
+    except Exception:
+        return False
+
+
+def remember_downloaded_pdf(cache: dict, key: str, pdf_path: str) -> str | None:
+    """Remember a verified PDF path in an in-memory scraper cache."""
+    if cache is None or not key or not _valid_pdf_path(pdf_path):
+        return None
+    try:
+        abs_path = os.path.abspath(pdf_path)
+        cache[str(key)] = abs_path
+        return abs_path
+    except Exception:
+        return None
+
+
+def reuse_downloaded_pdf(cache: dict, key: str, output_dir: str, filename: str = None) -> str | None:
+    """Copy a previously downloaded PDF into output_dir when still available."""
+    if cache is None or not key:
+        return None
+    src = cache.get(str(key))
+    if not _valid_pdf_path(src):
+        try:
+            cache.pop(str(key), None)
+        except Exception:
+            pass
+        return None
+    try:
+        os.makedirs(output_dir, exist_ok=True)
+        dst = os.path.join(output_dir, filename or os.path.basename(src))
+        if os.path.abspath(src) != os.path.abspath(dst):
+            shutil.copyfile(src, dst)
+        return dst
+    except Exception:
+        return None
 
 
 # ---------------------------------------------------------------------------

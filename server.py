@@ -17,6 +17,9 @@ from ieee_scraper import scraper_instance as ieee_scraper
 from arxiv_scraper import scraper_instance as arxiv_scraper
 from acm_scraper import scraper_instance as acm_scraper
 from sd_scraper import scraper_instance as sd_scraper
+from aiaa_scraper import scraper_instance as aiaa_scraper
+from mdpi_scraper import scraper_instance as mdpi_scraper
+from wos_scraper import scraper_instance as wos_scraper
 from gs_scraper import scraper_instance as gs_scraper
 from patyee_scraper import PatyeeScraper
 from dawei_scraper import DaweiScraper
@@ -36,6 +39,9 @@ SUPPORTED_SCRAPERS = {
     "ARXIV": arxiv_scraper,
     "ACM": acm_scraper,
     "SD": sd_scraper,
+    "AIAA": aiaa_scraper,
+    "MDPI": mdpi_scraper,
+    "WOS": wos_scraper,
     "GS": gs_scraper,
     "PATYEE": patyee_scraper,
     "DAWEI": dawei_scraper,
@@ -59,18 +65,47 @@ def _newest(paths) -> Path | None:
     return max(items, key=lambda p: p.stat().st_mtime)
 
 
+async def _download_pdf_to_library(norm: str, scraper, lib, native_id: str, url: str) -> tuple[Path | None, str]:
+    """Download one PDF into the canonical library directory and upsert it."""
+    canonical_dir = lib.canonical_dir(norm, native_id)
+    canonical_dir.mkdir(parents=True, exist_ok=True)
+    res = await scraper.download_paper(url, str(canonical_dir))
+
+    actual_pdf: Path | None = None
+    if isinstance(res, str) and os.path.exists(res):
+        actual_pdf = Path(res)
+    else:
+        actual_pdf = _newest(canonical_dir.glob("*.pdf"))
+
+    if actual_pdf and actual_pdf.exists():
+        try:
+            await asyncio.to_thread(
+                lib.upsert_paper, norm, native_id,
+                detail_link=url,
+                pdf_path=str(actual_pdf),
+            )
+        except Exception as e:
+            print(f"[Library] upsert after download failed: {e}")
+        return actual_pdf, str(res)
+
+    return None, str(res)
+
+
 @mcp.tool()
 async def search_papers(query: str, platform: str = "CNKI", search_field: str = "主题", db_scope: str = "总库", source_type: str = "all", journal: str = None, start_year: int = None, end_year: int = None, sort_by: str = "relevance", start_index: int = 0, limit: int = 10) -> str:
     """
     Search for academic papers.
     - query: The search term (e.g. "大语言模型" or "Machine Learning").
-    - platform: Target platform. "CNKI", "IEEE", "ARXIV", "ACM", "SD", "GS", "PATYEE", or "DAWEI". Default is "CNKI".
+    - platform: Target platform. "CNKI", "IEEE", "ARXIV", "ACM", "SD", "AIAA", "MDPI", "WOS", "GS", "PATYEE", or "DAWEI". Default is "CNKI".
     - search_field: Target field/content-type for the query.
         - CNKI defaults to "主题". Options: "主题", "篇关摘", "关键词", "篇名", "全文", "作者", "第一作者", "通讯作者", "作者单位", "基金", "摘要", "小标题", "参考文献", "分类号", "文献来源", "DOI".
         - IEEE defaults to "All". Options: "All", "Authors", "Books", "Conferences", "Courses", "Journals & Magazines", "Standards", "Citations", "Images".
         - ARXIV defaults to "all". Options: "all" (All), "ti" (Title), "au" (Author), "abs" (Abstract), "cat" (Category).
         - ACM defaults to "AllField". Options: "AllField", "Title", "Abstract", "Author".
         - SD defaults to "qs". Options: "qs" (All Keywords), "title", "authors".
+        - AIAA defaults to "AllField". Options: "AllField", "Title", "Abstract", "Contrib"/"Author", "Keyword".
+        - MDPI defaults to "all". Options: "all", "authors".
+        - WOS defaults to "TS" (Topic). Options: "TS"/"Topic", "TI"/"Title", "AU"/"Author", "DO"/"DOI", "AB"/"Abstract", "UT"/"Accession", or "ADVANCED" for native WoS query syntax such as `TS=("aeroelastic flutter") AND PY=(2020-2026)`.
         - GS defaults to "all". Google Scholar inherently performs robust fuzzy semantic matching.
         - PATYEE defaults to "all".
         - DAWEI defaults to "all".
@@ -81,9 +116,12 @@ async def search_papers(query: str, platform: str = "CNKI", search_field: str = 
         - ARXIV: "all" (Default), "cs" (Computer Science), "math" (Mathematics), "physics", "q-bio", "q-fin", "stat", "eess", "econ".
         - ACM: "all" (Default), "research-article", "short-paper", "review-article", "tutorial", "opinion".
         - SD: "all" (Default), "REV" (Review articles), "FLA" (Research articles), "TRP" (Tutorials), "chp" (Book chapters).
+        - AIAA: "all" (Default), "conference", "journal", "book".
+        - MDPI: "all" (Default), "Article", "Review", "Communication", "Editorial".
+        - WOS: "all" (Default), or a document type substring such as "Article", "Review", "Proceedings Paper".
         - PATYEE: You can specify "发明", "实用新型", etc.
         - DAWEI: "发明申请", "发明授权", "实用新型", "外观设计".
-    - journal: Optional publication/journal name to filter by. Supported on SD, GS, IEEE.
+    - journal: Optional publication/journal name to filter by. Supported on SD, GS, IEEE, WOS.
     - start_year: Optional start year (e.g. 2023).
     - end_year: Optional end year (e.g. 2026).
     - sort_by: Sorting method. Options: "relevance" (Default), "citations", "date_desc".
@@ -135,7 +173,7 @@ async def get_paper_details(url: str, platform: str = "CNKI") -> str:
     """
     Get detailed information (abstract, keywords, DOI) for a paper.
     - url: The absolute URL of the paper detail page (detail_link from search results).
-    - platform: Target platform. "CNKI", "IEEE", "ARXIV", "ACM", "SD", "GS", "PATYEE", or "DAWEI". Default is "CNKI".
+    - platform: Target platform. "CNKI", "IEEE", "ARXIV", "ACM", "SD", "AIAA", "MDPI", "WOS", "GS", "PATYEE", or "DAWEI". Default is "CNKI".
     """
     norm = (platform or "CNKI").upper()
     scraper = get_scraper(norm)
@@ -198,7 +236,7 @@ async def download_paper(url: str, output_dir: str, platform: str = "CNKI") -> s
     Download the PDF of the paper to a specific local directory.
     - url: The absolute URL of the paper detail page.
     - output_dir: The local directory path to save the PDF.
-    - platform: Target platform. "CNKI", "IEEE", "ARXIV", "ACM", "SD", "GS", "PATYEE", or "DAWEI". Default is "CNKI".
+    - platform: Target platform. "CNKI", "IEEE", "ARXIV", "ACM", "SD", "AIAA", "MDPI", "WOS", "GS", "PATYEE", or "DAWEI". Default is "CNKI".
 
     Returns the absolute file path of the downloaded PDF.
     """
@@ -216,25 +254,8 @@ async def download_paper(url: str, output_dir: str, platform: str = "CNKI") -> s
         mirrored = lib.mirror_pdf_to(Path(cached["pdf_path"]), output_dir)
         return f"Download result: {mirrored} (library cache hit)"
 
-    canonical_dir = lib.canonical_dir(norm, native_id)
-    canonical_dir.mkdir(parents=True, exist_ok=True)
-    res = await scraper.download_paper(url, str(canonical_dir))
-
-    actual_pdf: Path | None = None
-    if isinstance(res, str) and os.path.exists(res):
-        actual_pdf = Path(res)
-    else:
-        actual_pdf = _newest(canonical_dir.glob("*.pdf"))
-
-    if actual_pdf and actual_pdf.exists():
-        try:
-            await asyncio.to_thread(
-                lib.upsert_paper, norm, native_id,
-                detail_link=url,
-                pdf_path=str(actual_pdf),
-            )
-        except Exception as e:
-            print(f"[Library] upsert after download failed: {e}")
+    actual_pdf, res = await _download_pdf_to_library(norm, scraper, lib, native_id, url)
+    if actual_pdf:
         mirrored = lib.mirror_pdf_to(actual_pdf, output_dir)
         return f"Download result: {mirrored}"
 
@@ -249,7 +270,7 @@ async def read_paper_content(url: str, output_dir: str, platform: str = "CNKI") 
     The resulting `.md` file with relative image links is saved inside `output_dir`.
     - url: The absolute URL of the paper detail page.
     - output_dir: An absolutely/relatively resolved local directory path to hold the files.
-    - platform: Target platform. "CNKI", "IEEE", "ARXIV", "ACM", "SD", "GS", "PATYEE", or "DAWEI". Default is "CNKI".
+    - platform: Target platform. "CNKI", "IEEE", "ARXIV", "ACM", "SD", "AIAA", "MDPI", "WOS", "GS", "PATYEE", or "DAWEI". Default is "CNKI".
 
     Returns the local path of the final MD document and the first 1000 characters as a preview.
     """
@@ -291,10 +312,10 @@ async def read_paper_content(url: str, output_dir: str, platform: str = "CNKI") 
                 pass
             return f"Markdown generation complete. Saved to: {mirrored_md}\n\nPreview:\n{preview}... (library cache hit)"
 
+    # 2) PDF cached but MD missing or cached MD failed the quality gate: convert.
     canonical_dir = lib.canonical_dir(norm, native_id)
     canonical_dir.mkdir(parents=True, exist_ok=True)
 
-    # 2) PDF cached but MD missing or cached MD failed the quality gate: convert.
     if cached and cached.get("pdf_path") and os.path.exists(cached["pdf_path"]):
         try:
             from pdf_utils import convert_pdf_to_markdown
@@ -312,7 +333,30 @@ async def read_paper_content(url: str, output_dir: str, platform: str = "CNKI") 
         except Exception as e:
             print(f"[Library] Cached-PDF→MD conversion failed: {e}")
 
-    # 3) Full miss: run the scraper into the canonical dir, then mirror to caller.
+    # 3) Full miss: download once into the library, then use the shared
+    # converter. This keeps first-read behavior aligned with download_paper()
+    # and prevents each scraper's older read implementation from diverging.
+    actual_pdf, download_result = await _download_pdf_to_library(norm, scraper, lib, native_id, url)
+    if actual_pdf and actual_pdf.exists():
+        try:
+            from pdf_utils import convert_pdf_to_markdown
+            converted = await asyncio.to_thread(
+                convert_pdf_to_markdown, str(actual_pdf), str(canonical_dir)
+            )
+            await asyncio.to_thread(
+                lib.upsert_paper, norm, native_id,
+                detail_link=url,
+                pdf_path=str(actual_pdf),
+                md_path=converted.md_path,
+                images_dir=str(Path(converted.md_path).parent / "images"),
+            )
+            mirrored_md = lib.mirror_markdown_to(Path(converted.md_path), output_dir)
+            return f"Markdown generation complete. Saved to: {mirrored_md}\n\nPreview:\n{converted.preview}... (fresh download, freshly converted)"
+        except Exception as e:
+            print(f"[Library] Fresh PDF→MD conversion failed: {e}")
+
+    # 4) No valid PDF through the common path (e.g. GS or publisher-unavailable
+    # samples). Preserve legacy platform-specific behavior as a fallback.
     raw_result = await scraper.read_paper_content(url, str(canonical_dir))
     md_path = _newest(canonical_dir.glob("*.md"))
     pdf_path = _newest(canonical_dir.glob("*.pdf"))
@@ -329,10 +373,11 @@ async def read_paper_content(url: str, output_dir: str, platform: str = "CNKI") 
         except Exception as e:
             print(f"[Library] upsert after read failed: {e}")
         mirrored_md = lib.mirror_markdown_to(md_path, output_dir)
+        preview = ""
         try:
             preview = md_path.read_text(encoding="utf-8")[:1000]
         except Exception:
-            preview = ""
+            pass
         return f"Markdown generation complete. Saved to: {mirrored_md}\n\nPreview:\n{preview}..."
 
     if isinstance(raw_result, tuple):
@@ -342,10 +387,10 @@ async def read_paper_content(url: str, output_dir: str, platform: str = "CNKI") 
 
 
 @mcp.tool()
-async def warmup_platform_auth(platforms: str = "ACM,SD", timeout_seconds: int = None) -> str:
+async def warmup_platform_auth(platforms: str = "ACM,SD,AIAA,WOS", timeout_seconds: int = None) -> str:
     """
     Open visible browser windows to refresh anti-bot verification sessions for selected platforms.
-    - platforms: Comma-separated platform codes. Currently useful for "ACM" and "SD".
+    - platforms: Comma-separated platform codes. Currently useful for "ACM", "SD", "AIAA", and "WOS".
     - timeout_seconds: Optional manual verification wait time per platform. Defaults to runtime config.
 
     After the user completes Cloudflare/DataDome/Turnstile in the browser, cookies and the pinned
@@ -354,11 +399,11 @@ async def warmup_platform_auth(platforms: str = "ACM,SD", timeout_seconds: int =
     """
     requested = [
         item.strip().upper()
-        for item in str(platforms or "ACM,SD").replace(";", ",").split(",")
+    for item in str(platforms or "ACM,SD,AIAA,WOS").replace(";", ",").split(",")
         if item.strip()
     ]
     if not requested:
-        requested = ["ACM", "SD"]
+        requested = ["ACM", "SD", "AIAA", "WOS"]
 
     results = []
     for norm in requested:

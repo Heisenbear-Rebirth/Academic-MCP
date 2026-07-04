@@ -11,6 +11,7 @@ import re
 import hashlib
 import urllib.parse
 import aiohttp
+from scraper_utils import remember_downloaded_pdf, reuse_downloaded_pdf
 
 print = safe_stderr_print
 
@@ -21,6 +22,7 @@ class IEEEScraper:
         self.context = None
         self.page = None
         self.http_session = None
+        self._pdf_cache = {}
     
     async def initialize(self, force_headful=False):
         import json
@@ -718,9 +720,20 @@ class IEEEScraper:
         if not match:
             return "Could not find arnumber in detail_url."
         arnumber = match.group(1)
+        cached = reuse_downloaded_pdf(
+            self._pdf_cache,
+            arnumber,
+            output_dir,
+            f"ieee_{arnumber}.pdf",
+        )
+        if cached:
+            print(f"[IEEE] Reused in-process PDF cache for {arnumber}.")
+            return cached
 
         try:
-            return await self._download_paper_direct(detail_url, output_dir, arnumber)
+            res = await self._download_paper_direct(detail_url, output_dir, arnumber)
+            remember_downloaded_pdf(self._pdf_cache, arnumber, res)
+            return res
         except Exception as e:
             print(f"[IEEE] Direct PDF request failed ({e}); falling back to browser download.")
 
@@ -819,6 +832,7 @@ class IEEEScraper:
             if os.path.getsize(file_path) < 70000:
                 return f"Error: Download generated successfully but size seems to be an HTML trap ({os.path.getsize(file_path)} bytes)."
                 
+            remember_downloaded_pdf(self._pdf_cache, arnumber, file_path)
             return file_path
         except Exception as e:
             return f"Error downloading IEEE PDF: {str(e)}"

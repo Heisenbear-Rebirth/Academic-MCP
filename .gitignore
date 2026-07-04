@@ -29,6 +29,8 @@ tmp/
 # DO NOT track these to avoid breaking local cross-environment security states
 .sd_profile/
 .acm_profile/
+.aiaa_profile/
+.wos_profile/
 .gs_profile/
 .ieee_profile/
 .cnki_profile/
