@@ -404,13 +404,17 @@ class WebOfScienceScraper:
 
     @staticmethod
     def _sort_value(sort_by: str) -> str:
+        # WoS NX sort descriptors, verified live. The old field-code style
+        # (PY.D / PY.A / TC.D) is rejected by the API with "Invocation error".
         value = str(sort_by or "relevance").strip().lower()
         if value in {"date_desc", "date", "newest", "year_desc"}:
-            return "PY.D"
+            return "date-descending"
         if value in {"date_asc", "oldest", "year_asc"}:
-            return "PY.A"
-        if value in {"citations", "cited"}:
-            return "TC.D"
+            return "date-ascending"
+        if value in {"citations", "cited", "citations_desc", "most_cited"}:
+            return "times-cited-descending"
+        if value in {"citations_asc", "least_cited"}:
+            return "times-cited-ascending"
         return "relevance"
 
     @classmethod
