@@ -56,22 +56,133 @@ class WebOfScienceScraper:
     ]
 
     FIELD_MAP = {
+        "all fields": "ALL",
+        "all field": "ALL",
+        "allfield": "ALL",
+        "allfields": "ALL",
+        "all": "ALL",
+        "everything": "ALL",
+        "any": "ALL",
+        "全部": "ALL",
+        "全部字段": "ALL",
         "": "TS",
-        "all": "TS",
         "topic": "TS",
+        "主题": "TS",
         "ts": "TS",
         "title": "TI",
+        "题名": "TI",
+        "标题": "TI",
         "ti": "TI",
         "author": "AU",
         "authors": "AU",
+        "作者": "AU",
         "au": "AU",
-        "doi": "DO",
-        "do": "DO",
+        "publication title": "SO",
+        "publication titles": "SO",
+        "source": "SO",
+        "source title": "SO",
+        "journal": "SO",
+        "journal title": "SO",
+        "刊名": "SO",
+        "来源": "SO",
+        "so": "SO",
+        "year": "PY",
+        "year published": "PY",
+        "publication year": "PY",
+        "published year": "PY",
+        "年份": "PY",
+        "发表年份": "PY",
+        "py": "PY",
+        "affiliation": "OG",
+        "affiliations": "OG",
+        "organization": "OG",
+        "organisation": "OG",
+        "institution": "OG",
+        "机构": "OG",
+        "单位": "OG",
+        "og": "OG",
+        "funding agency": "FO",
+        "funding agencies": "FO",
+        "funder": "FO",
+        "funders": "FO",
+        "基金资助机构": "FO",
+        "资助机构": "FO",
+        "fo": "FO",
+        "publisher": "PUBL",
+        "出版社": "PUBL",
+        "出版商": "PUBL",
+        "publ": "PUBL",
+        "pu": "PUBL",
+        "publication date": "DOP",
+        "date of publication": "DOP",
+        "发表日期": "DOP",
+        "出版日期": "DOP",
+        "dop": "DOP",
         "abstract": "AB",
+        "摘要": "AB",
         "ab": "AB",
         "accession": "UT",
         "accession number": "UT",
+        "入藏号": "UT",
         "ut": "UT",
+        "address": "AD",
+        "地址": "AD",
+        "ad": "AD",
+        "author identifiers": "AI",
+        "author identifier": "AI",
+        "author id": "AI",
+        "researcherid": "AI",
+        "orcid": "AI",
+        "ai": "AI",
+        "author keywords": "AK",
+        "author keyword": "AK",
+        "keywords": "AK",
+        "keyword": "AK",
+        "关键词": "AK",
+        "作者关键词": "AK",
+        "ak": "AK",
+        "conference": "CF",
+        "会议": "CF",
+        "cf": "CF",
+        "document type": "DT",
+        "doc type": "DT",
+        "doctype": "DT",
+        "文献类型": "DT",
+        "dt": "DT",
+        "doi": "DO",
+        "do": "DO",
+        "editor": "ED",
+        "editors": "ED",
+        "编者": "ED",
+        "ed": "ED",
+        "grant number": "FG",
+        "grant no": "FG",
+        "grant": "FG",
+        "基金号": "FG",
+        "项目号": "FG",
+        "fg": "FG",
+        "group author": "GP",
+        "group authors": "GP",
+        "团体作者": "GP",
+        "gp": "GP",
+        "keyword plus": "KP",
+        "keywords plus": "KP",
+        "keyword plus ®": "KP",
+        "kp": "KP",
+        "language": "LA",
+        "语言": "LA",
+        "la": "LA",
+        "pubmed id": "PMID",
+        "pubmed": "PMID",
+        "pmid": "PMID",
+        "web of science categories": "WC",
+        "web of science category": "WC",
+        "wos categories": "WC",
+        "wos category": "WC",
+        "category": "WC",
+        "categories": "WC",
+        "学科类别": "WC",
+        "wc": "WC",
     }
     ADVANCED_FIELD_ALIASES = {
         "advanced",
@@ -192,6 +303,129 @@ class WebOfScienceScraper:
         return value in cls.ADVANCED_FIELD_ALIASES
 
     @classmethod
+    def _field_code(cls, search_field: str) -> str:
+        value = str(search_field or "TS").strip()
+        return cls.FIELD_MAP.get(value.lower(), value.upper())
+
+    @staticmethod
+    def _row_boolean(value: str, default: str = "AND") -> str:
+        op = str(value or default).strip().upper()
+        return op if op in {"AND", "OR", "NOT"} else default
+
+    @classmethod
+    def _is_known_field(cls, value: str) -> bool:
+        text = str(value or "").strip()
+        if not text:
+            return False
+        return text.lower() in cls.FIELD_MAP or text.upper() in set(cls.FIELD_MAP.values())
+
+    @classmethod
+    def _row_from_mapping(cls, item: dict, *, default_field: str, default_boolean: str) -> dict | None:
+        field = (
+            item.get("rowField")
+            or item.get("field")
+            or item.get("search_field")
+            or item.get("searchField")
+            or default_field
+        )
+        text = item.get("rowText")
+        if text is None:
+            text = item.get("text")
+        if text is None:
+            text = item.get("query")
+        text = str(text or "").strip()
+        if not text:
+            return None
+        boolean = (
+            item.get("rowBoolean")
+            or item.get("op")
+            or item.get("operator")
+            or item.get("boolean")
+            or default_boolean
+        )
+        return {
+            "rowField": cls._field_code(field),
+            "rowText": text,
+            "rowBoolean": cls._row_boolean(boolean, default_boolean),
+        }
+
+    @classmethod
+    def _row_from_text(cls, line: str, *, default_field: str, default_boolean: str) -> dict | None:
+        text = str(line or "").strip()
+        if not text:
+            return None
+        boolean = default_boolean
+        op_match = re.match(r"^(AND|OR|NOT)\s+(.+)$", text, re.IGNORECASE)
+        if op_match:
+            boolean = cls._row_boolean(op_match.group(1), default_boolean)
+            text = op_match.group(2).strip()
+
+        field = default_field
+        field_match = re.match(r"^(.+?)\s*(?:=|:)\s*(.+)$", text)
+        if field_match and cls._is_known_field(field_match.group(1)):
+            field = field_match.group(1).strip()
+            text = field_match.group(2).strip()
+        if not text:
+            return None
+        return {
+            "rowField": cls._field_code(field),
+            "rowText": text,
+            "rowBoolean": boolean,
+        }
+
+    @classmethod
+    def _parse_fielded_rows(cls, query, search_field: str) -> list[dict]:
+        default_field = cls._field_code(search_field)
+        row_items = None
+        if isinstance(query, list):
+            row_items = query
+        elif isinstance(query, dict):
+            row_items = query.get("rows") or query.get("query")
+        else:
+            query_text = str(query or "").strip()
+            if query_text[:1] in {"[", "{"}:
+                try:
+                    decoded = json.loads(query_text)
+                    if isinstance(decoded, list):
+                        row_items = decoded
+                    elif isinstance(decoded, dict):
+                        row_items = decoded.get("rows") or decoded.get("query")
+                except Exception:
+                    row_items = None
+
+        rows = []
+        if row_items is not None:
+            for index, item in enumerate(row_items):
+                default_boolean = "AND" if index else ""
+                if isinstance(item, dict):
+                    row = cls._row_from_mapping(item, default_field=default_field, default_boolean=default_boolean)
+                else:
+                    row = cls._row_from_text(str(item), default_field=default_field, default_boolean=default_boolean)
+                if row:
+                    rows.append(row)
+        else:
+            parts = [part.strip() for part in re.split(r"[\r\n;]+", str(query or "")) if part.strip()]
+            if not parts:
+                parts = [str(query or "").strip()]
+            for index, part in enumerate(parts):
+                row = cls._row_from_text(
+                    part,
+                    default_field=default_field,
+                    default_boolean="AND" if index else "",
+                )
+                if row:
+                    rows.append(row)
+
+        if not rows:
+            rows = [{"rowField": default_field, "rowText": str(query or "").strip()}]
+        for index, row in enumerate(rows):
+            if index == 0:
+                row.pop("rowBoolean", None)
+            elif not row.get("rowBoolean"):
+                row["rowBoolean"] = "AND"
+        return rows
+
+    @classmethod
     def _build_search_clause(cls, query: str, search_field: str) -> tuple[str, dict]:
         if cls._advanced_search_requested(search_field):
             return (
@@ -205,16 +439,12 @@ class WebOfScienceScraper:
                 },
             )
 
-        field = cls.FIELD_MAP.get(
-            str(search_field or "TS").strip().lower(),
-            str(search_field or "TS").strip().upper(),
-        )
         return (
             "general",
             {
                 "mode": "general",
                 "database": "WOSCC",
-                "query": [{"rowField": field, "rowText": query}],
+                "query": cls._parse_fielded_rows(query, search_field),
             },
         )
 

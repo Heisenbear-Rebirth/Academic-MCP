@@ -260,13 +260,20 @@ Platform-specific behavior:
   `/api/wosnx/core/runQuerySearch` NDJSON endpoint and parses records,
   abstracts, citation counts, DOI, source, and document type metadata.
   `search_field="ADVANCED"` enables native Web of Science query syntax, for
-  example `TS=("aeroelastic flutter") AND PY=(2020-2026)`; normal fielded
-  search still supports `TS`, `TI`, `AU`, `DO`, `AB`, and `UT`. In the tested
-  Tongji VPN route, plain Python/curl HTTP stacks fail during TLS while
-  Chromium succeeds, so the scraper uses a verified Chromium profile to issue
-  API-level `fetch()` requests without clicking through the UI. PDF download
-  and full-text reading are intentionally unsupported; use DOI/publisher links
-  from the result with the native publisher scraper.
+  example `TS=("aeroelastic flutter") AND PY=(2020-2026)`. Normal fielded
+  search mirrors the WoS dropdown: `ALL`, `TS`, `TI`, `AU`, `SO`, `PY`, `OG`,
+  `FO`, `PUBL`, `DOP`, `AB`, `UT`, `AD`, `AI`, `AK`, `CF`, `DT`, `DO`, `ED`,
+  `FG`, `GP`, `KP`, `LA`, `PMID`, and `WC`, with English/Chinese aliases for
+  the common labels. Boolean basic-search rows are supported either as JSON
+  rows, for example
+  `[{"field":"TS","text":"flutter"},{"op":"OR","field":"TI","text":"aeroelastic"},{"op":"NOT","field":"AU","text":"Smith"}]`,
+  or as multiline shorthand: `TS=flutter`, `OR TI=aeroelastic`,
+  `NOT AU=Smith`. In the tested Tongji VPN route, plain Python/curl HTTP
+  stacks fail during TLS while Chromium succeeds, so the scraper uses a
+  verified Chromium profile to issue API-level `fetch()` requests without
+  clicking through the UI. PDF download and full-text reading are intentionally
+  unsupported; use DOI/publisher links from the result with the native
+  publisher scraper.
 
 ### `read_paper_content(url, output_dir, platform="CNKI")`
 
@@ -494,8 +501,8 @@ separately with run id `20260628_aiaa_final_relevance` (2026-06-28);
 MDPI was added and tested with run id `20260628_mdpi_retry` (2026-06-28). Each
 downloadable platform was tested with up to three fresh sample downloads.
 WOS was added as a discovery-only platform and smoke-tested with run id
-`20260704_wos_advanced` (2026-07-04), covering native advanced-search payloads
-through `search_field="ADVANCED"`.
+`20260704_wos_fields_boolean` (2026-07-04), covering native advanced-search
+payloads plus basic-field dropdown mappings and Boolean rows.
 These runs completed with **0 hard failures**. `unavailable` means the
 publisher or the tool semantics did not expose a downloadable PDF for that
 sample; it is not counted as a transport or parser failure.
@@ -509,7 +516,7 @@ sample; it is not counted as a transport or parser failure.
 | `SD`     | 15.312 s | 4.913 s | 3/3 OK: 4.835, 5.381, 3.819 s | success, 22.149 s |
 | `AIAA`   | 1.879 s | 0.828 s | 3/3 OK: 8.993, 5.554, 3.004 s | success, 14.402 s |
 | `MDPI`   | 2.388 s | 0.976 s | 3/3 OK: 4.977, 11.925, 19.477 s | success, 7.186 s |
-| `WOS`    | 9.295 s | 0.000 s | not applicable by design | not applicable |
+| `WOS`    | 9.026 s | 0.000 s | not applicable by design | not applicable |
 | `GS`     | 2.443 s | 0.000 s | not applicable by design | not applicable |
 | `PATYEE` | 1.695 s | 0.374 s | 1/3 OK, 2/3 unavailable | success, 8.778 s |
 | `DAWEI`  | 2.551 s | 0.755 s | 3/3 OK: 3.115, 3.284, 2.598 s | success, 4.768 s |

@@ -95,6 +95,10 @@ async def _download_pdf_to_library(norm: str, scraper, lib, native_id: str, url:
 async def search_papers(query: str, platform: str = "CNKI", search_field: str = "主题", db_scope: str = "总库", source_type: str = "all", journal: str = None, start_year: int = None, end_year: int = None, sort_by: str = "relevance", start_index: int = 0, limit: int = 10) -> str:
     """
     Search for academic papers.
+    WOS Boolean rows: pass query as JSON rows such as
+    `[{"field":"TS","text":"flutter"},{"op":"OR","field":"TI","text":"aeroelastic"},{"op":"NOT","field":"AU","text":"Smith"}]`,
+    or as multiline shorthand `TS=flutter\nOR TI=aeroelastic\nNOT AU=Smith`.
+    For native WoS syntax, set `search_field="ADVANCED"` and write AND/OR/NOT directly in the query.
     - query: The search term (e.g. "大语言模型" or "Machine Learning").
     - platform: Target platform. "CNKI", "IEEE", "ARXIV", "ACM", "SD", "AIAA", "MDPI", "WOS", "GS", "PATYEE", or "DAWEI". Default is "CNKI".
     - search_field: Target field/content-type for the query.
@@ -105,7 +109,7 @@ async def search_papers(query: str, platform: str = "CNKI", search_field: str = 
         - SD defaults to "qs". Options: "qs" (All Keywords), "title", "authors".
         - AIAA defaults to "AllField". Options: "AllField", "Title", "Abstract", "Contrib"/"Author", "Keyword".
         - MDPI defaults to "all". Options: "all", "authors".
-        - WOS defaults to "TS" (Topic). Options: "TS"/"Topic", "TI"/"Title", "AU"/"Author", "DO"/"DOI", "AB"/"Abstract", "UT"/"Accession", or "ADVANCED" for native WoS query syntax such as `TS=("aeroelastic flutter") AND PY=(2020-2026)`.
+        - WOS defaults to "TS" (Topic). Basic-field options mirror the WoS dropdown: "ALL"/"All Fields", "TS"/"Topic", "TI"/"Title", "AU"/"Author", "SO"/"Publication Titles", "PY"/"Year Published", "OG"/"Affiliation", "FO"/"Funding Agency", "PUBL"/"Publisher", "DOP"/"Publication Date", "AB"/"Abstract", "UT"/"Accession Number", "AD"/"Address", "AI"/"Author Identifiers", "AK"/"Author Keywords", "CF"/"Conference", "DT"/"Document Type", "DO"/"DOI", "ED"/"Editor", "FG"/"Grant Number", "GP"/"Group Author", "KP"/"Keyword Plus", "LA"/"Language", "PMID"/"PubMed ID", "WC"/"Web of Science Categories"; use "ADVANCED" for native WoS query syntax such as `TS=("aeroelastic flutter") AND PY=(2020-2026)`.
         - GS defaults to "all". Google Scholar inherently performs robust fuzzy semantic matching.
         - PATYEE defaults to "all".
         - DAWEI defaults to "all".

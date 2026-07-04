@@ -245,12 +245,17 @@ MYSQL_DATABASE=academic_mcp
   `/api/wosnx/core/runQuerySearch` NDJSON 接口，解析标题、作者、来源、
   DOI、摘要、文献类型和引用次数。`search_field="ADVANCED"` 会启用
   Web of Science 原生高级检索语法，例如
-  `TS=("aeroelastic flutter") AND PY=(2020-2026)`；普通字段检索仍支持
-  `TS`、`TI`、`AU`、`DO`、`AB`、`UT`。当前同济 VPN 链路下，普通
-  Python/curl HTTP 栈在 TLS 阶段会失败，而 Chromium 能成功，因此实现
-  使用已验证的 Chromium profile 在页面上下文中发 API-level `fetch()`；
-  不靠页面按钮点击解析结果。WOS 不负责 PDF 下载或全文阅读，应转交
-  DOI/出版商平台。
+  `TS=("aeroelastic flutter") AND PY=(2020-2026)`；普通字段检索已对齐
+  WoS 下拉菜单：`ALL`、`TS`、`TI`、`AU`、`SO`、`PY`、`OG`、`FO`、
+  `PUBL`、`DOP`、`AB`、`UT`、`AD`、`AI`、`AK`、`CF`、`DT`、`DO`、
+  `ED`、`FG`、`GP`、`KP`、`LA`、`PMID`、`WC`，并为常用英文/中文
+  字段名提供别名。普通字段检索也支持多行布尔连接，可传 JSON rows，例如
+  `[{"field":"TS","text":"flutter"},{"op":"OR","field":"TI","text":"aeroelastic"},{"op":"NOT","field":"AU","text":"Smith"}]`，
+  或多行简写：`TS=flutter`、`OR TI=aeroelastic`、`NOT AU=Smith`。当前同济
+  VPN 链路下，普通 Python/curl HTTP 栈在
+  TLS 阶段会失败，而 Chromium 能成功，因此实现使用已验证的 Chromium
+  profile 在页面上下文中发 API-level `fetch()`；不靠页面按钮点击解析结果。
+  WOS 不负责 PDF 下载或全文阅读，应转交 DOI/出版商平台。
 
 ### `read_paper_content(url, output_dir, platform="CNKI")`
 
@@ -458,8 +463,9 @@ PowerShell 版本（`library_web_start.ps1` / `library_web_stop.ps1`）
 `20260614_full_final`（2026-06-14）。AIAA 为新增平台，单独用 run id
 `20260628_aiaa_final_relevance`（2026-06-28）验证；MDPI 用 run id
 `20260628_mdpi_retry`（2026-06-28）验证。WOS 作为 discovery-only 平台用
-run id `20260704_wos_advanced`（2026-07-04）验证，覆盖
-`search_field="ADVANCED"` 的原生高级检索 payload。支持下载的平台最多各测 3 个
+run id `20260704_wos_fields_boolean`（2026-07-04）验证，覆盖
+`search_field="ADVANCED"` 的原生高级检索 payload、基础字段下拉映射和
+Boolean 多行连接。支持下载的平台最多各测 3 个
 新样本下载。这些测试硬失败均为 **0**。`unavailable` 表示出版方或工具语义
 没有为该样本暴露可下载 PDF，不计为传输或解析失败。
 
@@ -472,7 +478,7 @@ run id `20260704_wos_advanced`（2026-07-04）验证，覆盖
 | `SD`     | 15.312 s | 4.913 s | 3/3 OK：4.835、5.381、3.819 s | success，22.149 s |
 | `AIAA`   | 1.879 s | 0.828 s | 3/3 OK：8.993、5.554、3.004 s | success，14.402 s |
 | `MDPI`   | 2.388 s | 0.976 s | 3/3 OK：4.977、11.925、19.477 s | success，7.186 s |
-| `WOS`    | 9.295 s | 0.000 s | 设计上不适用 | not applicable |
+| `WOS`    | 9.026 s | 0.000 s | 设计上不适用 | not applicable |
 | `GS`     | 2.443 s | 0.000 s | 设计上不适用 | not applicable |
 | `PATYEE` | 1.695 s | 0.374 s | 1/3 OK，2/3 unavailable | success，8.778 s |
 | `DAWEI`  | 2.551 s | 0.755 s | 3/3 OK：3.115、3.284、2.598 s | success，4.768 s |
