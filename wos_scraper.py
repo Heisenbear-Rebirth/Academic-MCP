@@ -200,6 +200,91 @@ class WebOfScienceScraper:
         "高级搜索",
     }
 
+    # "Search in" database selector -> WoS `product` / `search.database` code.
+    # Codes are the official WoS values (the dropdown's `option-<CODE>` ids). All
+    # collections share the same normalised NX record schema and are keyed by
+    # their UT accession prefix (see _COLLECTION_PATH), so search /
+    # get_paper_details / caching work across databases. Default is WOSCC; an
+    # unrecognised value is passed through upper-cased.
+    DATABASE_MAP = {
+        "": "WOSCC",
+        "wos": "WOSCC",
+        "woscc": "WOSCC",
+        "core collection": "WOSCC",
+        "web of science core collection": "WOSCC",
+        "核心合集": "WOSCC",
+        "web of science 核心合集": "WOSCC",
+        "总库": "WOSCC",
+        "all": "ALLDB",
+        "alldb": "ALLDB",
+        "all databases": "ALLDB",
+        "所有数据库": "ALLDB",
+        "ccc": "CCC",
+        "current contents connect": "CCC",
+        "cscd": "CSCD",
+        "chinese science citation database": "CSCD",
+        "中国科学引文数据库": "CSCD",
+        "diidw": "DIIDW",
+        "derwent": "DIIDW",
+        "derwent innovations index": "DIIDW",
+        "德温特": "DIIDW",
+        "grants": "GRANTS",
+        "grants index": "GRANTS",
+        "kjd": "KJD",
+        "kci": "KJD",
+        "kci-korean journal database": "KJD",
+        "korean": "KJD",
+        "medline": "MEDLINE",
+        "medline®": "MEDLINE",
+        "pprn": "PPRN",
+        "preprint": "PPRN",
+        "preprint citation index": "PPRN",
+        "pqdt": "PQDT",
+        "proquest": "PQDT",
+        "dissertations": "PQDT",
+        "proquest dissertations & theses citation index": "PQDT",
+        "rc": "RC",
+        "research commons": "RC",
+        "scielo": "SCIELO",
+        "scielo citation index": "SCIELO",
+    }
+
+    # WOSCC "Editions" selector. The UI labels/codes differ from the API codes
+    # the runQuerySearch endpoint expects (e.g. CPCI-S -> ISTP), so every alias
+    # is normalised to the API code and sent as `search.editions=["WOS.<CODE>"]`.
+    # Leaving it empty (or "all") omits the field, which means all editions.
+    _EDITION_CODES = {"SCI", "SSCI", "AHCI", "ISTP", "ISSHP", "ESCI", "CCR", "IC"}
+    EDITION_MAP = {
+        "sci": "SCI",
+        "scie": "SCI",
+        "sci-expanded": "SCI",
+        "science citation index expanded": "SCI",
+        "science citation index": "SCI",
+        "ssci": "SSCI",
+        "social sciences citation index": "SSCI",
+        "social science citation index": "SSCI",
+        "ahci": "AHCI",
+        "a&hci": "AHCI",
+        "arts & humanities citation index": "AHCI",
+        "arts and humanities citation index": "AHCI",
+        "cpci-s": "ISTP",
+        "istp": "ISTP",
+        "conference proceedings citation index - science": "ISTP",
+        "conference proceedings citation index – science": "ISTP",
+        "conference proceedings citation index science": "ISTP",
+        "cpci-ssh": "ISSHP",
+        "isshp": "ISSHP",
+        "conference proceedings citation index - social science & humanities": "ISSHP",
+        "conference proceedings citation index – social science & humanities": "ISSHP",
+        "esci": "ESCI",
+        "emerging sources citation index": "ESCI",
+        "ccr": "CCR",
+        "ccr-expanded": "CCR",
+        "current chemical reactions": "CCR",
+        "ic": "IC",
+        "index chemicus": "IC",
+    }
+
     def __init__(self):
         self.context = None
         self.page = None
@@ -266,15 +351,46 @@ class WebOfScienceScraper:
                     authors.append(name)
         return authors
 
+    # WoS accession numbers (UT) are `PREFIX:VALUE`; the prefix identifies the
+    # collection and maps to the segment in a full-record URL. The segment is the
+    # lowercase product code (verified live for woscc/medline/ccc/cscd/kjd/pprn);
+    # only WOSCC differs from its "WOS" UT prefix. Any prefix not listed falls
+    # back to prefix.lower() (harmless -- the pipeline keys off the UT, not the
+    # URL path). For an All-Databases search, each record carries its home
+    # database's prefix, so links resolve to the right collection automatically.
+    _COLLECTION_PATH = {
+        "WOS": "woscc",
+        "MEDLINE": "medline",
+        "CCC": "ccc",
+        "CSCD": "cscd",
+        "DIIDW": "diidw",
+        "KJD": "kjd",
+        "PPRN": "pprn",
+        "PQDT": "pqdt",
+        "SCIELO": "scielo",
+        "GRANTS": "grants",
+        "RC": "rc",
+    }
+
     @staticmethod
     def _wos_id_from_url(url: str) -> str:
+        """Extract the WoS accession (UT) from a detail URL, any collection.
+
+        The UT is whatever follows ``/full-record/`` (e.g. ``WOS:000...``,
+        ``MEDLINE:39012345``, ``CCC:...``); a bare accession is matched too.
+        """
         decoded = urllib.parse.unquote(url or "")
-        match = re.search(r"(WOS:[A-Za-z0-9]+)", decoded, re.IGNORECASE)
-        return match.group(1).upper() if match else ""
+        match = re.search(r"/full-record/([^/?#]+)", decoded)
+        if match:
+            return match.group(1).strip()
+        match = re.search(r"([A-Za-z]{2,}:[A-Za-z0-9._-]+)", decoded)
+        return match.group(1) if match else ""
 
     @classmethod
     def _detail_link(cls, ut: str) -> str:
-        return f"{cls.BASE_URL}/wos/woscc/full-record/{urllib.parse.quote(ut, safe=':')}"
+        prefix = ut.split(":", 1)[0].upper() if ":" in ut else ""
+        collection = cls._COLLECTION_PATH.get(prefix) or (prefix.lower() if prefix else "woscc")
+        return f"{cls.BASE_URL}/wos/{collection}/full-record/{urllib.parse.quote(ut, safe=':')}"
 
     @staticmethod
     def _year_from_record(record: dict) -> int | None:
@@ -306,6 +422,66 @@ class WebOfScienceScraper:
     def _field_code(cls, search_field: str) -> str:
         value = str(search_field or "TS").strip()
         return cls.FIELD_MAP.get(value.lower(), value.upper())
+
+    @classmethod
+    def _database_code(cls, db_scope: str) -> str:
+        """Map a friendly 'Search in' value to a WoS product/database code.
+
+        Defaults to WOSCC (the only database this scraper fully parses).
+        Unknown values are passed through upper-cased so an explicit product
+        code still works, but callers should expect best-effort parsing there.
+        """
+        value = str(db_scope or "").strip()
+        if not value:
+            return "WOSCC"
+        return cls.DATABASE_MAP.get(value.lower(), value.upper())
+
+    @classmethod
+    def _edition_code(cls, token: str) -> str | None:
+        """Resolve one edition alias/label to its API code (e.g. CPCI-S -> ISTP)."""
+        text = str(token or "").strip()
+        if not text:
+            return None
+        low = text.lower()
+        if low in cls.EDITION_MAP:
+            return cls.EDITION_MAP[low]
+        if low.startswith("wos."):
+            low = low[4:]
+            if low in cls.EDITION_MAP:
+                return cls.EDITION_MAP[low]
+        # A full UI label carries the code in parentheses, e.g.
+        # "Science Citation Index Expanded (SCI-EXPANDED)--1975-present".
+        match = re.search(r"\(([^)]+)\)", low)
+        if match and match.group(1).strip() in cls.EDITION_MAP:
+            return cls.EDITION_MAP[match.group(1).strip()]
+        if text.upper() in cls._EDITION_CODES:
+            return text.upper()
+        return None
+
+    @classmethod
+    def _parse_editions(cls, editions) -> list[str] | None:
+        """Normalise an editions request to `["WOS.<CODE>", ...]` or None (=all).
+
+        Accepts a comma/semicolon-separated string or a list of aliases, UI
+        labels, or API codes. Unknown tokens are skipped.
+        """
+        if editions is None:
+            return None
+        if isinstance(editions, str):
+            text = editions.strip()
+            if not text or text.lower() in {"all", "all editions", "全部", "所有", "全部版本"}:
+                return None
+            tokens = [t.strip() for t in re.split(r"[;,]", text) if t.strip()]
+        elif isinstance(editions, (list, tuple, set)):
+            tokens = [str(t).strip() for t in editions if str(t).strip()]
+        else:
+            return None
+        codes: list[str] = []
+        for token in tokens:
+            code = cls._edition_code(token)
+            if code and code not in codes:
+                codes.append(code)
+        return [f"WOS.{code}" for code in codes] or None
 
     @staticmethod
     def _row_boolean(value: str, default: str = "AND") -> str:
@@ -426,27 +602,37 @@ class WebOfScienceScraper:
         return rows
 
     @classmethod
-    def _build_search_clause(cls, query: str, search_field: str) -> tuple[str, dict]:
+    def _build_search_clause(
+        cls,
+        query: str,
+        search_field: str,
+        database: str = "WOSCC",
+        editions: list[str] | None = None,
+    ) -> tuple[str, dict]:
         if cls._advanced_search_requested(search_field):
-            return (
+            search_mode, search = (
                 "advanced",
                 {
                     "mode": "general",
-                    "database": "WOSCC",
+                    "database": database,
                     "query": [{"rowText": query}],
                     "sets": [],
                     "options": {"lemmatize": "On"},
                 },
             )
-
-        return (
-            "general",
-            {
-                "mode": "general",
-                "database": "WOSCC",
-                "query": cls._parse_fielded_rows(query, search_field),
-            },
-        )
+        else:
+            search_mode, search = (
+                "general",
+                {
+                    "mode": "general",
+                    "database": database,
+                    "query": cls._parse_fielded_rows(query, search_field),
+                },
+            )
+        # Editions are a WOSCC-only refinement; omitting the key means "All".
+        if editions and database == "WOSCC":
+            search["editions"] = list(editions)
+        return search_mode, search
 
     def _build_search_payload(
         self,
@@ -455,10 +641,16 @@ class WebOfScienceScraper:
         search_field: str,
         sort_by: str,
         count: int,
+        database: str = "WOSCC",
+        editions: list[str] | None = None,
     ) -> dict:
-        search_mode, search = self._build_search_clause(query, search_field)
+        search_mode, search = self._build_search_clause(query, search_field, database, editions)
+        # The analyze buckets and JCR enrichment are WOSCC-only; sending them for
+        # another database makes the server reject the whole request
+        # (Server.invalidInput), so restrict them to WOSCC.
+        is_woscc = (database or "WOSCC") == "WOSCC"
         return {
-            "product": "WOSCC",
+            "product": database or "WOSCC",
             "searchMode": search_mode,
             "viewType": "search",
             "serviceMode": "summary",
@@ -466,9 +658,9 @@ class WebOfScienceScraper:
             "retrieve": {
                 "count": max(1, min(100, int(count or 20))),
                 "history": True,
-                "jcr": True,
+                "jcr": is_woscc,
                 "sort": self._sort_value(sort_by),
-                "analyzes": self.ANALYZES,
+                "analyzes": self.ANALYZES if is_woscc else [],
                 "locale": "en",
             },
             "eventMode": None,
@@ -771,15 +963,20 @@ class WebOfScienceScraper:
         sort_by: str = "relevance",
         start_index: int = 0,
         limit: int = 10,
+        editions: str = "",
     ) -> Dict:
         start_index = max(0, int(start_index or 0))
         limit = max(1, int(limit or 10))
         fetch_count = min(100, start_index + limit)
+        database = self._database_code(db_scope)
+        editions_list = self._parse_editions(editions)
         payload = self._build_search_payload(
             query,
             search_field=search_field,
             sort_by=sort_by,
             count=fetch_count,
+            database=database,
+            editions=editions_list,
         )
         try:
             items = await self._page_fetch_ndjson(payload)

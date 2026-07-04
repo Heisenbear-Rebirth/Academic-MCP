@@ -160,7 +160,7 @@ MONGODB_DATABASE=academic_mcp
 | `query`        | str           | 搜索词。自由文本；可用每平台原生语法（如 IEEE 的 `("Publication Title":"...")`）。                              |
 | `platform`     | str           | `CNKI` / `IEEE` / `ARXIV` / `ACM` / `SD` / `AIAA` / `MDPI` / `WOS` / `GS` / `PATYEE` / `DAWEI` 之一。                      |
 | `search_field` | str           | 限定查询字段。每平台口径不同（详见 docstring），默认走该平台的「全部」。                                          |
-| `db_scope`     | str           | CNKI 专用：`总库 / 中文 / 外文`。                                                                                |
+| `db_scope`     | str           | 数据库。CNKI：`总库 / 中文 / 外文`。WOS：「Search in」数据库（默认 `WOSCC`）。已验证：`WOSCC`、`ALLDB`、`CCC`、`CSCD`、`KJD`、`MEDLINE`、`PPRN`、`PQDT`、`RC`、`SCIELO`。不支持：`DIIDW`（德温特）、`GRANTS`。`editions` 仅对 WOSCC 生效。 |
 | `source_type`  | str           | 文献类型过滤（research-article / conference / journal / …），每平台口径不同。                                    |
 | `journal`      | str \| None   | 期刊 / 来源限定。服务端结合 URL 级过滤 + 客户端 `venue_matches` 模糊比对（容忍 Google Scholar 的 `…` 截断标记）。 |
 | `start_year`   | int \| None   | 发表年下界（含）。                                                                                              |
@@ -168,6 +168,7 @@ MONGODB_DATABASE=academic_mcp
 | `sort_by`      | str           | `relevance`（默认）/ `citations` / `date_desc`。                                                                |
 | `start_index`  | int           | 分页偏移；如传 20 跳过前 10–20 条。                                                                              |
 | `limit`        | int           | 返回最多多少条（默认 10）。                                                                                      |
+| `editions`     | str           | WOS 专用。限定 WOSCC「Editions」，留空 = 全部。逗号分隔的代码/标签：`SCI-EXPANDED`(`SCI`) / `SSCI` / `AHCI` / `CPCI-S` / `CPCI-SSH` / `ESCI` / `CCR-EXPANDED` / `IC`。 |
 
 **返回** JSON 字符串：
 

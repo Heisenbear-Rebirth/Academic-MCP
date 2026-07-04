@@ -92,7 +92,7 @@ async def _download_pdf_to_library(norm: str, scraper, lib, native_id: str, url:
 
 
 @mcp.tool()
-async def search_papers(query: str, platform: str = "CNKI", search_field: str = "主题", db_scope: str = "总库", source_type: str = "all", journal: str = None, start_year: int = None, end_year: int = None, sort_by: str = "relevance", start_index: int = 0, limit: int = 10) -> str:
+async def search_papers(query: str, platform: str = "CNKI", search_field: str = "主题", db_scope: str = "总库", source_type: str = "all", journal: str = None, start_year: int = None, end_year: int = None, sort_by: str = "relevance", start_index: int = 0, limit: int = 10, editions: str = "") -> str:
     """
     Search for academic papers.
     WOS Boolean rows: pass query as JSON rows such as
@@ -113,7 +113,9 @@ async def search_papers(query: str, platform: str = "CNKI", search_field: str = 
         - GS defaults to "all". Google Scholar inherently performs robust fuzzy semantic matching.
         - PATYEE defaults to "all".
         - DAWEI defaults to "all".
-    - db_scope: Database scope (CNKI only). Options: "总库" (All), "中文" (Chinese), "外文" (Foreign).
+    - db_scope: Database scope.
+        - CNKI: "总库" (All), "中文" (Chinese), "外文" (Foreign).
+        - WOS: the "Search in" database (default "WOSCC"). Verified working: WOSCC, ALLDB (All Databases), CCC (Current Contents Connect), CSCD (Chinese Science Citation Database), KJD (KCI-Korean), MEDLINE, PPRN (Preprint Citation Index), PQDT (ProQuest Dissertations & Theses), RC (Research Commons), SCIELO. Not supported: DIIDW (Derwent) and GRANTS (Grants Index) — specialized patent/grant databases that reject standard topic search. `editions` apply to WOSCC only.
     - source_type: Specific category filter.
         - CNKI: "all" (Default), "学术期刊", "学位论文", "会议", "报纸", "图书", "标准", "专利", etc.
         - IEEE: "all" (Default), "Conferences", "Journals", "Magazines", "Books", "Early Access Articles", "Standards", "Courses".
@@ -131,6 +133,7 @@ async def search_papers(query: str, platform: str = "CNKI", search_field: str = 
     - sort_by: Sorting method. Options: "relevance" (Default), "citations", "date_desc".
     - start_index: Pagination offset. E.g. start_index=20 will skip first page and start fetching from item 21. Use this to jump pages!
     - limit: Max number of results to fetch. Default is 10.
+    - editions: WOS only. Restrict the WOSCC "Editions". Empty = All (default). Pass a comma-separated list of edition codes/labels: "SCI-EXPANDED" (or "SCI"), "SSCI", "AHCI", "CPCI-S", "CPCI-SSH", "ESCI", "CCR-EXPANDED", "IC". E.g. editions="SCI-EXPANDED,SSCI".
 
     Returns a JSON string containing `total_results` (number of matches found for the scope) and a `papers` array of basic paper info (id, title, author, source, date, detail_link).
     **PRO TIP**: You should read titles from this function, then pass 'detail_link' into `get_paper_details` or `read_paper_content`.
@@ -146,17 +149,22 @@ async def search_papers(query: str, platform: str = "CNKI", search_field: str = 
         "sort_by": sort_by,
         "start_index": start_index,
         "limit": limit,
+        "editions": editions,
     }
     try:
         scraper = get_scraper(norm)
         lib = get_library()
 
         async def fetch():
-            return await scraper.search_papers(
+            kwargs = dict(
                 query=query, search_field=search_field, db_scope=db_scope, source_type=source_type,
                 journal=journal, start_year=start_year, end_year=end_year, sort_by=sort_by,
                 start_index=start_index, limit=limit,
             )
+            # `editions` is a WoS-only refinement; other scrapers don't accept it.
+            if norm == "WOS":
+                kwargs["editions"] = editions
+            return await scraper.search_papers(**kwargs)
 
         results, cache_hit = await lib.search_or_fetch(norm, query, filters, fetch)
         if isinstance(results, dict):

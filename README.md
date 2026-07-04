@@ -167,7 +167,7 @@ appear to the LLM with the docstrings preserved verbatim.
 | `query`        | str           | The search terms. Free text; per-platform syntax (e.g. IEEE supports `("Publication Title":"...")`) is allowed. |
 | `platform`     | str           | One of `CNKI`, `IEEE`, `ARXIV`, `ACM`, `SD`, `AIAA`, `MDPI`, `WOS`, `GS`, `PATYEE`, `DAWEI`.                         |
 | `search_field` | str           | Restricts the query field. Platform-specific (see docstring); defaults to each platform's "all".            |
-| `db_scope`     | str           | CNKI only: `总库 / 中文 / 外文`.                                                                                  |
+| `db_scope`     | str           | Database. CNKI: `总库 / 中文 / 外文`. WOS: the "Search in" database (default `WOSCC`). Verified: `WOSCC`, `ALLDB`, `CCC`, `CSCD`, `KJD`, `MEDLINE`, `PPRN`, `PQDT`, `RC`, `SCIELO`. Not supported: `DIIDW` (Derwent), `GRANTS`. `editions` apply to WOSCC only. |
 | `source_type`  | str           | Document type filter (research-article, conference, journal, …). Platform-specific.                         |
 | `journal`      | str \| None   | Restrict to a publication. Server combines URL-level filters with a client-side fuzzy `venue_matches` check that tolerates Google-Scholar-style "…" truncations.    |
 | `start_year`   | int \| None   | Inclusive lower bound on publication year.                                                                  |
@@ -175,6 +175,7 @@ appear to the LLM with the docstrings preserved verbatim.
 | `sort_by`      | str           | `relevance` (default), `citations`, or `date_desc`.                                                         |
 | `start_index`  | int           | Pagination offset; pass e.g. 20 to skip the first page of 10–20 results.                                    |
 | `limit`        | int           | Max number of results to return (default 10).                                                               |
+| `editions`     | str           | WOS only. Restrict the WOSCC "Editions"; empty = All. Comma-separated codes/labels: `SCI-EXPANDED`(`SCI`), `SSCI`, `AHCI`, `CPCI-S`, `CPCI-SSH`, `ESCI`, `CCR-EXPANDED`, `IC`. |
 
 **Returns** a JSON string with:
 

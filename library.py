@@ -112,9 +112,14 @@ def _mdpi_native_id(url: str) -> str:
 
 
 def _wos_native_id(url: str) -> str:
+    # UT accession for any WoS collection (WOS:, MEDLINE:, CCC:, ...). Must stay
+    # consistent with wos_scraper._wos_id_from_url so the cache key equals the UT.
     decoded = urllib.parse.unquote(url or "")
-    match = re.search(r"(WOS:[A-Za-z0-9]+)", decoded, re.IGNORECASE)
-    return match.group(1).upper() if match else ""
+    match = re.search(r"/full-record/([^/?#]+)", decoded)
+    if match:
+        return match.group(1).strip()
+    match = re.search(r"([A-Za-z]{2,}:[A-Za-z0-9._-]+)", decoded)
+    return match.group(1) if match else ""
 
 
 def _gs_native_id(url: str) -> str:
