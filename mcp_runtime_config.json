@@ -5,6 +5,7 @@
   "allow_headful_fallback": false,
   "allow_headful_fallback_platforms": ["ACM", "SD", "AIAA", "WOS"],
   "manual_verification_timeout_seconds": 180,
+  "verification_window": [1100, 740],
   "library_root": ".repo",
   "library_enabled": true,
   "library_web_host": "127.0.0.1",

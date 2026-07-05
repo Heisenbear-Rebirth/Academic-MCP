@@ -17,6 +17,7 @@ from runtime_config import (
     ensure_runtime_environment,
     manual_verification_timeout_seconds,
     profile_path,
+    verification_window_size,
 )
 
 print = safe_stderr_print
@@ -27,11 +28,14 @@ class WebOfScienceScraper:
     """Discovery-only Web of Science scraper.
 
     WoS' normal browser flow posts NDJSON requests to `/api/wosnx/core/*`.
-    In the current Tongji VPN route, plain Python HTTP clients and Playwright's
-    APIRequestContext fail before TLS completes, while Chromium page networking
-    succeeds. We therefore issue API-level `fetch()` calls inside a verified
-    persistent Chromium profile. This still avoids UI scraping/clicking for
-    search data; the visible browser is only used for manual verification.
+    Generic TLS clients (Python HTTP, Playwright's APIRequestContext) are dropped
+    before TLS completes on the Tongji VPN route, but a real browser's page
+    networking succeeds -- Camoufox (Firefox) works here too. We issue API-level
+    `fetch()` calls inside a persistent Camoufox context with a *pinned*
+    fingerprint, so a headless session reuses the same cf_clearance a headful
+    verification produced. Runs headless by default; the visible window only
+    appears for manual verification (never for a routine, already-verified
+    search).
     """
 
     BASE_URL = "https://webofscience.clarivate.cn"
@@ -288,7 +292,7 @@ class WebOfScienceScraper:
     def __init__(self):
         self.context = None
         self.page = None
-        self.playwright_cm = None
+        self.camoufox_cm = None
         self.allow_headful_fallback = allow_headful_fallback_for("WOS")
         self.manual_verification_timeout = manual_verification_timeout_seconds()
         self._record_cache: dict[str, dict] = {}
@@ -670,15 +674,15 @@ class WebOfScienceScraper:
             "eventMode": None,
         }
 
-    async def _ensure_browser(self, *, force_headful: bool = True):
+    async def _ensure_browser(self, *, force_headful: bool = False):
         if self.context and self.page:
             return
-        from playwright.async_api import async_playwright
-        from scraper_utils import apply_browser_cookies, pooled_profile
+        from camoufox.async_api import AsyncCamoufox
+        from scraper_utils import apply_browser_cookies, pooled_profile, load_or_create_fingerprint
 
         profile_dir, self._profile_ephemeral = pooled_profile(self.PROFILE_BASE, "WOS")
         self._profile_dir = profile_dir
-        for lock_name in ("lockfile", "SingletonLock", "SingletonCookie", "SingletonSocket"):
+        for lock_name in ("lockfile", "SingletonLock", "parent.lock", ".parentlock"):
             lock_path = os.path.join(profile_dir, lock_name)
             if os.path.exists(lock_path):
                 try:
@@ -686,18 +690,45 @@ class WebOfScienceScraper:
                 except Exception:
                     pass
 
-        print(f"[WOS] Initializing Chromium profile (Headless: {not force_headful})...")
-        self.playwright_cm = async_playwright()
-        playwright = await self.playwright_cm.__aenter__()
-        self.context = await playwright.chromium.launch_persistent_context(
-            profile_dir,
+        # A pinned fingerprint is identical headless vs headful, so a
+        # cf_clearance minted during a headful verification stays valid for
+        # later headless fetches -- that is what lets routine searches stay
+        # windowless.
+        _shared_fp = load_or_create_fingerprint("WOS")
+        # Pin a modest, on-screen window size so the (rare) headful verification
+        # window fits a laptop screen and the captcha is reachable. Applied to
+        # BOTH modes so the fingerprint stays identical (camoufox ignores the
+        # `window=` launch arg once an explicit fingerprint is supplied).
+        if _shared_fp is not None:
+            try:
+                from camoufox.fingerprints import handle_window_size
+                _vw, _vh = verification_window_size()
+                handle_window_size(_shared_fp, _vw, _vh)
+                # handle_window_size centers within the fingerprint's (often
+                # large/offset) virtual screen, which can land off the real
+                # display. Anchor near the top-left so the window is always
+                # visible.
+                try:
+                    _shared_fp.screen.screenX = 40
+                    _shared_fp.screen.screenY = 40
+                except Exception:
+                    pass
+            except Exception as e:
+                print(f"[WOS] window-size pin skipped: {e}")
+        print(f"[WOS] Initializing Camoufox context (Headless: {not force_headful})...")
+        _cam_kw = dict(
             headless=not force_headful,
-            viewport={"width": 1440, "height": 1000},
-            locale="en-US",
-            timezone_id="Asia/Shanghai",
-            accept_downloads=False,
-            args=["--disable-blink-features=AutomationControlled"],
+            user_data_dir=profile_dir,
+            persistent_context=True,
+            os="windows",
+            humanize=True,
+            geoip=True,
         )
+        if _shared_fp is not None:
+            _cam_kw["fingerprint"] = _shared_fp
+            _cam_kw["i_know_what_im_doing"] = True
+        self.camoufox_cm = AsyncCamoufox(**_cam_kw)
+        self.context = await self.camoufox_cm.__aenter__()
         self.page = self.context.pages[0] if self.context.pages else await self.context.new_page()
         await apply_browser_cookies(self.context, "WOS")
         try:
@@ -716,7 +747,9 @@ class WebOfScienceScraper:
             pass
 
     async def _page_fetch_ndjson(self, payload: dict) -> list[dict]:
-        await self._ensure_browser(force_headful=True)
+        # Headless by default; warmup_auth() re-opens headful only when the API
+        # replies that human verification is required.
+        await self._ensure_browser(force_headful=False)
         result = await self.page.evaluate(
             """async ({ payload }) => {
                 const sid = (
@@ -1053,12 +1086,12 @@ class WebOfScienceScraper:
                 print(f"[WOS] context close failed: {e}")
             self.context = None
             self.page = None
-        if self.playwright_cm:
+        if self.camoufox_cm:
             try:
-                await self.playwright_cm.__aexit__(None, None, None)
+                await self.camoufox_cm.__aexit__(None, None, None)
             except Exception as e:
-                print(f"[WOS] playwright close failed: {e}")
-            self.playwright_cm = None
+                print(f"[WOS] camoufox close failed: {e}")
+            self.camoufox_cm = None
         if self._profile_dir:
             from scraper_utils import cleanup_pooled_profile
 

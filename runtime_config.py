@@ -89,6 +89,19 @@ def manual_verification_timeout_seconds() -> int:
         return 180
 
 
+def verification_window_size() -> tuple:
+    """(width, height) of the headful verification window, kept small enough to
+    fit a laptop screen so the captcha is reachable. Override in
+    mcp_runtime_config.json via "verification_window": [width, height]."""
+    config = load_runtime_config()
+    raw = config.get("verification_window") or [1100, 740]
+    try:
+        w, h = int(raw[0]), int(raw[1])
+        return max(600, w), max(480, h)
+    except Exception:
+        return 1100, 740
+
+
 def library_root_path() -> Path:
     config = load_runtime_config()
     raw = str(config.get("library_root") or ".repo")
