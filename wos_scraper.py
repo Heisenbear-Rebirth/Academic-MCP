@@ -846,8 +846,8 @@ class WebOfScienceScraper:
             except Exception:
                 pass
             print(
-                ">>> PLEASE COMPLETE WOS HUMAN VERIFICATION IN THE CHROMIUM WINDOW. "
-                f"Waiting up to {self.manual_verification_timeout}s... <<<"
+                ">>> PLEASE COMPLETE WOS HUMAN VERIFICATION IN THE BROWSER WINDOW "
+                f"(small window, top-left). Waiting up to {self.manual_verification_timeout}s... <<<"
             )
             ok = await self._warmup_until_fetch_ok(self.manual_verification_timeout)
 
@@ -1020,8 +1020,15 @@ class WebOfScienceScraper:
         except Exception as first_error:
             if not self.allow_headful_fallback:
                 raise
-            print(f"[WOS] API fetch needs warmup ({first_error}); opening verification flow.")
+            # The (headless) fetch was refused -- almost always an expired /
+            # missing cf_clearance. Open the headful verification window so the
+            # user can re-solve, then retry.
+            print(f"[WOS] API fetch needs verification ({first_error}); opening verification window.")
             await self.warmup_auth()
+            # warmup_auth stored the fresh clearance in the shared cookie store;
+            # drop the headful context so the retry + later searches go back to
+            # silent headless. The window only lives during verification.
+            await self.close()
             items = await self._page_fetch_ndjson(payload)
         return self._parse_search_items(
             items,
